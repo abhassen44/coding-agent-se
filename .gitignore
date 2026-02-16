@@ -1,0 +1,6 @@
+beatcode/
+start/
+.venv
+__pycache__
+*.pyc
+.env

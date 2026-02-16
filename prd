@@ -1,0 +1,402 @@
+# Product Requirements Document (PRD)
+
+## Product Name
+
+**Intelligent Coding Agent (ICA)**
+
+## Vision
+
+Build a production‑ready, web‑based intelligent coding assistant that enables developers to **chat about code, understand repositories, safely execute programs, and automate workflows** from a single interface—combining the best of **Cursor, Bolt, Replit Agent, and GitHub Copilot Chat**.
+
+The product must be **secure, scalable, explainable, and automation‑friendly**, suitable for both individual developers and teams.
+
+---
+
+## Goals & Objectives
+
+### Primary Goals
+
+* Provide a **chat‑first AI coding experience** with deep code understanding
+* Enable **safe, sandboxed code execution** across multiple languages
+* Support **repository‑level intelligence using RAG**
+* Automate developer workflows (build, test, run, analyze)
+* Maintain **traceability, history, and admin oversight**
+
+### Success Metrics (KPIs)
+
+* Median chat response latency ≤ **5 seconds**
+* ≥ **95% execution success** within sandbox limits
+* Zero critical security incidents
+* ≥ **90% task completion reliability**
+* High user retention (repeat sessions)
+
+---
+
+## Target Users
+
+### 1. Developer (USER)
+
+* Students
+* Professional developers
+* Open‑source contributors
+* Interview candidates
+
+### 2. Administrator (ADMIN)
+
+* Platform operator
+* Security auditor
+* System maintainer
+
+---
+
+## Core Use Cases
+
+### Developer Use Cases
+
+* Ask coding questions ("Explain this error")
+* Generate code in multiple languages
+* Debug compile/runtime errors
+* Upload files or repositories for analysis
+* Ask repo‑level questions ("Where is auth handled?")
+* Run and test code safely
+* Automate workflows (CI‑like tasks)
+* View chat history and execution logs
+
+### Admin Use Cases
+
+* Manage users and roles
+* Monitor executions and resource usage
+* View system and security logs
+* Configure AI, execution, and system limits
+
+---
+
+## Functional Requirements
+
+### 1️⃣ Authentication & User Management
+
+**Features**
+
+* User registration, login, logout
+* JWT‑based authentication
+* Role‑based access control (USER / ADMIN)
+* Profile management
+
+**Acceptance Criteria**
+
+* Secure password hashing (bcrypt/argon2)
+* Token expiration & refresh
+* Admin‑only routes protected
+
+---
+
+### 2️⃣ Chat & AI Intelligence
+
+**Features**
+
+* Chat‑first UI
+* Streaming responses (SSE/WebSockets)
+* Multi‑turn conversational context
+* Markdown rendering
+* Syntax‑highlighted code blocks
+* Copy / Run buttons on code blocks
+
+**AI Capabilities**
+
+* Code generation
+* Code explanation (line‑by‑line)
+* Debugging & error analysis
+* Best‑practice suggestions
+
+---
+
+### 3️⃣ Code Intelligence Engine
+
+**Supported Languages (Initial)**
+
+* Python
+* JavaScript / TypeScript
+* C++
+* Java
+
+**Capabilities**
+
+* Generate clean, idiomatic code
+* Explain existing code
+* Debug compile/runtime errors
+* Suggest optimizations
+* Context‑aware refinement
+
+---
+
+### 4️⃣ RAG – Repository & File Intelligence
+
+**Indexing Sources**
+
+* Uploaded files
+* Workspace files
+* GitHub repositories
+
+**Pipeline**
+
+* Chunk files
+* Embed using Gemini embeddings
+* Store in vector DB (Qdrant / FAISS)
+* Retrieve top‑K relevant chunks
+* Inject into AI context
+
+**Constraints**
+
+* Prefer retrieved context over hallucination
+* Internal citation for traceability
+
+---
+
+### 5️⃣ Sandboxed Execution Engine
+
+**Capabilities**
+
+* Compile & run code safely
+* Capture stdout / stderr
+* Time, CPU, and memory limits
+
+**Isolation**
+
+* Docker‑like sandbox
+* No network by default
+* No filesystem escape
+
+**Security Rules**
+
+* Command allow‑list
+* No destructive operations
+* Execution timeout enforced
+
+---
+
+### 6️⃣ Task Automation & Workflows
+
+**Features**
+
+* Define multi‑step tasks
+* Steps: build → test → run → analyze
+* Background execution
+* Manual or scheduled triggers
+
+**Tracking**
+
+* Task status (pending/running/completed/failed)
+* Execution logs per step
+
+---
+
+### 7️⃣ File & Repository Handling
+
+**Features**
+
+* Upload files
+* Create / modify files
+* Import GitHub repos
+* Detect project structure & dependencies
+* Re‑index on change
+
+---
+
+### 8️⃣ History & Traceability
+
+**Stored Data**
+
+* Chat history per user
+* Execution history
+* Task audit logs
+* Admin system logs
+
+---
+
+## Non‑Functional Requirements
+
+### Security
+
+* No unrestricted shell access
+* Input validation everywhere
+* Execution sandbox isolation
+* Secrets never exposed to AI
+
+### Performance
+
+* Chat response ≤ 5s (median)
+* Async background jobs
+
+### Scalability
+
+* Stateless backend
+* Horizontal scaling supported
+* Externalized storage
+
+### Reliability
+
+* Clear error messages
+* Retry‑safe operations
+
+### Maintainability
+
+* Modular services
+* Clean APIs
+* Clear folder structure
+
+---
+
+## Technical Architecture
+
+### Frontend
+
+* Next.js
+* TailwindCSS
+* Monaco Editor
+* WebSockets / SSE
+
+### Backend
+
+* FastAPI
+* REST + WebSocket APIs
+* Celery / Background tasks
+
+### AI Layer
+
+* gemini‑3‑pro
+* Tool‑calling enabled
+* RAG pipeline
+
+### Storage
+
+* PostgreSQL (users, tasks, history)
+* Vector DB (Qdrant / FAISS)
+* File storage (local / S3‑style)
+
+### Execution Engine
+
+* Isolated runner service
+* Language‑specific executors
+
+---
+
+## High‑Level System Architecture
+
+**Frontend → API Gateway → AI Orchestrator**
+
+* Auth Service
+* Chat Service
+* RAG Service
+* Execution Service
+* Task Scheduler
+* Admin Service
+
+All services communicate via secure APIs.
+
+---
+
+## Data Models (High‑Level)
+
+### User
+
+* id
+* email
+* password_hash
+* role
+* created_at
+
+### ChatSession
+
+* id
+* user_id
+* messages[]
+* created_at
+
+### Execution
+
+* id
+* user_id
+* language
+* code
+* stdout
+* stderr
+* status
+
+### Task
+
+* id
+* user_id
+* steps[]
+* status
+* schedule
+
+---
+
+## Phased Delivery Plan
+
+### Phase 1 – Foundation
+
+* Auth system
+* User roles
+* Basic chat UI
+* Basic AI chat
+
+### Phase 2 – Code Intelligence
+
+* Code generation
+* Explanation
+* Debugging
+* Markdown rendering
+
+### Phase 3 – File & RAG
+
+* File uploads
+* Repo indexing
+* Context‑aware answers
+
+### Phase 4 – Execution Engine
+
+* Sandboxed runners
+* Output capture
+* Error diagnostics
+
+### Phase 5 – Automation
+
+* Task definitions
+* Workflow execution
+* Scheduling
+
+### Phase 6 – Admin Panel
+
+* User management
+* Logs & monitoring
+* System settings
+
+---
+
+## Risks & Mitigations
+
+| Risk                 | Mitigation              |
+| -------------------- | ----------------------- |
+| Code execution abuse | Strict sandbox & limits |
+| Hallucinations       | RAG‑first strategy      |
+| High latency         | Streaming + async       |
+| Scaling issues       | Stateless services      |
+
+---
+
+## Out of Scope (v1)
+
+* Mobile app
+* Real‑time collaborative editing
+* Paid billing system
+
+---
+
+## Final Outcome
+
+A developer can:
+
+> "Upload a repository, ask questions about it, generate and run code, debug errors, automate workflows, and manage everything through a single intelligent AI agent."
+
+This PRD defines the blueprint to build a **production‑ready Intelligent Coding Agent** end‑to‑end.

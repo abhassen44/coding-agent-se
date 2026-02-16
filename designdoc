@@ -1,0 +1,326 @@
+# 🧠 Intelligent Coding Agent (ICA)
+
+## UI/UX Design Specification Document
+
+---
+
+## 1. Purpose
+
+This document defines the **UI/UX design vision, layout system, interaction patterns, and visual hierarchy** for the **Intelligent Coding Agent (ICA)** web application.
+
+ICA is a **chat‑first, developer‑centric coding assistant** that combines:
+
+* Conversational AI
+* Repository browsing & RAG‑based context retrieval
+* Sandbox code execution
+* Task automation & analytics dashboard
+
+The goal is to deliver a **data‑rich yet minimal interface**, inspired by **modern finance dashboards**, optimized for clarity, productivity, and technical workflows.
+
+---
+
+## 2. Design Inspiration
+
+Inspired by professional finance and analytics platforms (e.g., Monera‑style dashboards):
+
+* Clean, grid‑based layouts
+* Strong navigation hierarchy
+* Card‑driven modular UI
+* Clear status indicators & metrics
+* Information density without visual clutter
+
+---
+
+## 3. Design Goals
+
+### 3.1 Developer‑Focused
+
+* Optimized for reading, writing, and navigating code
+* Monospaced typography for all code surfaces
+* Keyboard‑friendly interactions
+
+### 3.2 Context Awareness
+
+* Simultaneous visibility of:
+
+  * Chat
+  * Repository files
+  * Execution output
+  * Tasks & automation
+
+### 3.3 Data‑Rich but Minimal
+
+* Only actionable or relevant information shown
+* Progressive disclosure for advanced details
+
+### 3.4 Modular & Responsive
+
+* Panel‑based layout
+* Adaptive behavior across screen sizes
+
+### 3.5 Visual Consistency
+
+* Unified design system for:
+
+  * Alerts
+  * Badges
+  * Cards
+  * Status indicators
+
+---
+
+## 4. Layout Architecture
+
+### 4.1 Overall Application Structure
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Top Navigation (Global)                                     │
+├────────────────────────────────────────────────────────────┤
+│ Sidebar Navigation | Main Content Area                      │
+│                    |                                      │
+│                    |                                      │
+└────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 5. Global Navigation (Top Bar)
+
+### Components
+
+* Product Logo & Name
+* Global Search (Repos, Chats, Tasks)
+* Notifications Icon
+* User Profile & Settings
+* Current Context Tag (Active Repo / Project)
+
+### Behavior
+
+* Fixed position
+* Context tag updates dynamically
+
+**Example:**
+
+```
+[ ICA ]   Search…   🔔   [ Repo: SVG-Draw ]   Profile
+```
+
+---
+
+## 6. Left Sidebar Navigation
+
+### Navigation Sections
+
+| Section            | Icon | Description                |
+| ------------------ | ---- | -------------------------- |
+| Chat               | 💬   | AI conversation workspace  |
+| Repositories       | 📁   | Uploaded repos & files     |
+| Execution          | ▶️   | Code runner & scripts      |
+| Tasks / Automation | ⚙️   | Scheduled jobs & workflows |
+| History            | 🕒   | Past sessions & chats      |
+| Admin (Role‑based) | 👑   | System & user controls     |
+
+### Design Notes
+
+* Collapsible sidebar
+* Active section clearly highlighted
+* Icon‑only mode when collapsed
+
+---
+
+## 7. Main Content Area — View Types
+
+---
+
+### 7.1 Chat & Code Workspace (Primary View)
+
+```
+┌──────────────────────────────┬──────────────────────────────┐
+│ Repo / File Tree             │ Chat + Code Workspace        │
+│                              │                              │
+│                              │ Messages & Code Blocks      │
+│                              │                              │
+│                              │ Execution Pane              │
+└──────────────────────────────┴──────────────────────────────┘
+```
+
+#### Key Features
+
+* Streaming AI responses
+* Inline code blocks with syntax highlighting
+* Hover actions: Copy / Run / Explain / Refactor
+* Chat input supporting markdown & tool calls
+
+**Primary focus area of the app**
+
+---
+
+### 7.2 Repository Browser / RAG View
+
+```
+┌──────────────┬──────────────┬──────────────────┐
+│ File Tree    │ Code Viewer  │ Context Panel    │
+└──────────────┴──────────────┴──────────────────┘
+```
+
+#### Features
+
+* Tree‑based file explorer
+* Syntax‑highlighted file viewer
+* AI‑suggested relevant snippets
+* Index status badges (Indexed / Pending)
+
+#### Design Style
+
+* Card‑based context panels
+* Clear separation between code & insights
+
+---
+
+### 7.3 Execution Dashboard
+
+```
+┌──────────────┬──────────────┬────────────────┐
+│ Past Runs    │ Active Run   │ Logs           │
+└──────────────┴──────────────┴────────────────┘
+```
+
+#### Components
+
+* Language selector
+* Code editor with line numbers
+* Run / Stop controls
+* Stdout / stderr logs
+* Execution metrics (time, memory)
+
+#### Visual Indicators
+
+* Success → Green badge
+* Warning → Amber badge
+* Failure → Red badge
+
+---
+
+### 7.4 Task Automation Dashboard
+
+Finance‑style workflow analytics layout
+
+```
+──────────── TASK SUMMARY ────────────
+| Completed | Running | Failed | Scheduled |
+──────────────────────────────────────
+```
+
+#### Features
+
+* Status summary cards
+* Task list with last run info
+* Timeline / Gantt visualization
+* Retry & trigger controls
+* Logs per task
+
+---
+
+## 8. UI Component System
+
+### 8.1 Colors
+
+* Neutral base: White / Light Gray / Dark Gray
+* Accent colors:
+
+  * Success: Green
+  * Warning: Amber
+  * Error: Red
+  * Info: Blue
+
+### 8.2 Typography
+
+* Sans‑serif for UI
+* Monospace for code & logs
+* Clear heading hierarchy
+
+### 8.3 Cards
+
+* Used for:
+
+  * Repo insights
+  * Task summaries
+  * Execution results
+  * Context suggestions
+
+Consistent padding, subtle shadows, rounded corners
+
+---
+
+## 9. Alerts & Feedback
+
+### Types
+
+* Toast notifications (async events)
+* Inline error banners
+* Status badges
+
+### Examples
+
+* "Indexing complete"
+* "Execution failed — see logs"
+
+---
+
+## 10. Responsive Behavior
+
+| Breakpoint | Behavior                         |
+| ---------- | -------------------------------- |
+| Large      | Full multi‑panel layout          |
+| Medium     | Sidebar collapsed by default     |
+| Mobile     | Tabbed views + bottom navigation |
+
+---
+
+## 11. Interaction Patterns
+
+### Chat
+
+* Streaming responses
+* Action buttons on code blocks
+
+### Files
+
+* Right‑click actions:
+
+  * Index for RAG
+  * View history
+  * Open in editor
+
+### Tasks
+
+* Quick retry icons
+* Status filters
+* Cron‑based scheduling modal
+
+---
+
+## 12. Visual Hierarchy Principles
+
+1. **Primary:** Chat & workspace (center)
+2. **Secondary:** Repo tree & context panels
+3. **Tertiary:** Logs, metrics, dashboards
+
+Mirrors financial dashboards where critical data is immediately visible and secondary analytics remain accessible but unobtrusive.
+
+---
+
+## 13. Summary
+
+The ICA UI is designed as a **professional‑grade developer dashboard**, combining:
+
+* Conversational intelligence
+* Code‑first workflows
+* Analytics‑style clarity
+
+This design ensures scalability, usability, and long‑term maintainability while remaining familiar to developers accustomed to modern IDEs and finance‑grade dashboards.
+
+---
+
+**End of Design Specification**
