@@ -13,6 +13,7 @@ from app.schemas.chat import (
     CodeResponse,
 )
 from app.services.gemini_service import get_gemini_service
+from app.services.qwen_service import get_qwen_service
 from app.services.rag_service import RAGService
 from app.core.database import get_db
 
@@ -37,10 +38,17 @@ async def get_rag_context(
     return context_response.context if context_response.context else None
 
 
+def get_ai_service(provider: str = "gemini"):
+    """Get the appropriate AI service based on provider."""
+    if provider == "qwen":
+        return get_qwen_service()
+    return get_gemini_service()
+
+
 @router.post("/message", response_model=ChatResponse)
 async def send_message(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     """Send a message and get AI response with optional RAG context."""
-    gemini = get_gemini_service()
+    ai_service = get_ai_service(request.provider or "gemini")
     
     # Convert history to dict format
     history = None
@@ -57,7 +65,7 @@ async def send_message(request: ChatRequest, db: AsyncSession = Depends(get_db))
         context_used = True
     
     # Generate response with context
-    response = await gemini.generate_response(request.message, history, context)
+    response = await ai_service.generate_response(request.message, history, context)
     
     session_id = request.session_id or str(uuid.uuid4())
     
@@ -67,7 +75,7 @@ async def send_message(request: ChatRequest, db: AsyncSession = Depends(get_db))
 @router.post("/stream")
 async def stream_message(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     """Stream AI response for a message with optional RAG context."""
-    gemini = get_gemini_service()
+    ai_service = get_ai_service(request.provider or "gemini")
     
     # Convert history to dict format
     history = None
@@ -80,7 +88,7 @@ async def stream_message(request: ChatRequest, db: AsyncSession = Depends(get_db
         context = await get_rag_context(db, request.message, request.repository_id)
     
     async def generate() -> AsyncGenerator[str, None]:
-        async for chunk in gemini.stream_response(request.message, history, context):
+        async for chunk in ai_service.stream_response(request.message, history, context):
             yield f"data: {chunk}\n\n"
         yield "data: [DONE]\n\n"
     

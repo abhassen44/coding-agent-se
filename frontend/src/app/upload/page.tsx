@@ -29,6 +29,7 @@ export default function UploadPage() {
     const [githubUrl, setGithubUrl] = useState('');
     const [isImporting, setIsImporting] = useState(false);
     const [importStatus, setImportStatus] = useState<string | null>(null);
+    const [importProgress, setImportProgress] = useState<{ percent: number, message: string } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const getToken = () => typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
@@ -105,11 +106,44 @@ export default function UploadPage() {
         Array.from(e.dataTransfer.files).forEach(uploadFile);
     }, [selectedRepo]);
 
+    const pollProgress = async (repoId: number) => {
+        const token = getToken();
+        if (!token) return;
+
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`${API_BASE}/repo/import/progress/${repoId}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setImportProgress({ percent: data.percent || 0, message: data.message || '' });
+
+                    if (data.status === 'complete' || data.status === 'error') {
+                        clearInterval(interval);
+                        setIsImporting(false);
+                        if (data.status === 'complete') {
+                            setImportStatus('Repository imported successfully!');
+                            setGithubUrl('');
+                            fetchRepositories();
+                            setSelectedRepo(repoId);
+                        } else {
+                            setImportStatus(`Error: ${data.message || 'Import failed'}`);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Progress poll error", err);
+            }
+        }, 1000);
+    };
+
     const handleGitHubImport = async () => {
         const token = getToken();
         if (!token || !githubUrl.trim()) return;
         setIsImporting(true);
-        setImportStatus('Cloning repository...');
+        setImportStatus('Initializing import...');
+        setImportProgress({ percent: 0, message: 'Starting...' });
 
         try {
             const response = await fetch(`${API_BASE}/repo/import`, {
@@ -119,17 +153,18 @@ export default function UploadPage() {
             });
 
             if (response.ok) {
-                setImportStatus('Repository imported!');
-                setGithubUrl('');
-                fetchRepositories();
+                const data = await response.json();
+                pollProgress(data.id);
             } else {
                 const error = await response.json();
                 setImportStatus(`Error: ${error.detail || 'Import failed'}`);
+                setIsImporting(false);
+                setImportProgress(null);
             }
         } catch (err) {
             setImportStatus('Error: Failed to import');
-        } finally {
             setIsImporting(false);
+            setImportProgress(null);
         }
     };
 
@@ -242,7 +277,23 @@ export default function UploadPage() {
                         >
                             {isImporting ? 'Importing...' : 'Import'}
                         </button>
-                        {importStatus && (
+
+                        {importProgress && isImporting && (
+                            <div className="mt-4">
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span className="text-[#E6F1EC]">{importProgress.message}</span>
+                                    <span className="text-[#2EFF7B]">{importProgress.percent}%</span>
+                                </div>
+                                <div className="w-full bg-[#1A2420] rounded-full h-1.5 overflow-hidden">
+                                    <div
+                                        className="bg-[#2EFF7B] h-1.5 rounded-full transition-all duration-300 ease-out"
+                                        style={{ width: `${importProgress.percent}%` }}
+                                    ></div>
+                                </div>
+                            </div>
+                        )}
+
+                        {importStatus && !isImporting && (
                             <p className={`mt-3 text-xs p-2 rounded-lg ${importStatus.includes('Error') ? 'bg-red-500/10 text-red-400' : 'bg-[#2EFF7B]/10 text-[#2EFF7B]'}`}>
                                 {importStatus}
                             </p>

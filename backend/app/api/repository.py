@@ -11,6 +11,7 @@ from app.models.file import Repository, File, FileChunk
 from app.services.file_service import FileService
 from app.services.rag_service import RAGService
 from app.services.github_service import GitHubService
+from app.services.progress import update_progress, get_progress, clear_progress
 from app.schemas.file import (
     RepositoryCreate,
     RepositoryImport,
@@ -111,11 +112,14 @@ async def import_github_repository(
             gh = GitHubService()
 
             # 1. Get the full file tree (single API call)
+            update_progress(repo_id, status="fetching_tree", message="Fetching repository structure...")
             file_list = await gh.get_repo_tree(gh_owner, gh_repo, gh_branch)
-            logger.info(f"Fetching {len(file_list)} files from {gh_owner}/{gh_repo}")
+            total_files = len(file_list)
+            logger.info(f"Fetching {total_files} files from {gh_owner}/{gh_repo}")
 
             # 2. Fetch file contents in batches
             file_paths = [f.path for f in file_list]
+            update_progress(repo_id, status="fetching_files", total=total_files, message=f"Downloading {total_files} files...")
             contents = await gh.get_files_batch(gh_owner, gh_repo, file_paths, gh_branch, batch_size=5)
 
             # 3. Store and index each file
@@ -124,7 +128,14 @@ async def import_github_repository(
                 rag_service = RAGService(session)
                 indexed_count = 0
 
-                for gh_file in file_list:
+                for i, gh_file in enumerate(file_list):
+                    update_progress(
+                        repo_id, 
+                        status="indexing", 
+                        current=i + 1, 
+                        total=total_files, 
+                        message=f"Indexing {gh_file.name}..."
+                    )
                     content = contents.get(gh_file.path)
                     if content is None:
                         continue
@@ -160,12 +171,15 @@ async def import_github_repository(
                     repo.indexed_at = datetime.now()
                     await session.commit()
 
+                update_progress(repo_id, status="complete", total=total_files, current=total_files, message=f"Imported {indexed_count} files successfully!")
                 logger.info(f"Import complete: {indexed_count} files indexed for {gh_owner}/{gh_repo}")
 
         except Exception as e:
+            update_progress(repo_id, status="error", message=f"Import failed: {str(e)}")
             logger.error(f"Import failed for {gh_owner}/{gh_repo}: {e}")
 
     # Start background task
+    update_progress(new_repo.id, status="starting", message="Initializing import...")
     background_tasks.add_task(
         fetch_and_index,
         new_repo.id,
@@ -178,6 +192,37 @@ async def import_github_repository(
     response = RepositoryResponse.model_validate(new_repo)
     response.file_count = 0
     return response
+
+
+@router.get("/import/progress/{repo_id}")
+async def get_import_progress(
+    repo_id: int,
+    db: DbSession,
+    current_user: CurrentUser
+):
+    """Get real-time import progress for a repository."""
+    # Verify ownership
+    result = await db.execute(
+        select(Repository).where(
+            Repository.id == repo_id,
+            Repository.owner_id == current_user.id
+        )
+    )
+    repo = result.scalar_one_or_none()
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found"
+        )
+
+    progress = get_progress(repo_id)
+    if not progress:
+        # If no active import, check if repo is fully indexed
+        if repo.indexed_at:
+            return {"status": "complete", "percent": 100, "message": "Repository is fully indexed"}
+        return {"status": "idle", "percent": 0, "message": "No active import"}
+
+    return progress
 
 
 @router.get("", response_model=RepositoryListResponse)

@@ -17,6 +17,7 @@ class ChatRequest(BaseModel):
     history: Optional[List[ChatMessage]] = None
     repository_id: Optional[int] = None  # For RAG context injection
     context: Optional[str] = None  # Pre-fetched context
+    provider: Optional[str] = "gemini"  # "gemini" or "qwen"
 
 
 class ChatResponse(BaseModel):
