@@ -1,19 +1,24 @@
 """Service for interacting with Google Gemini AI."""
 import os
+import asyncio
 from typing import AsyncGenerator, Optional
 from dotenv import load_dotenv
-import google.generativeai as genai
+from pathlib import Path
+from google import genai
+from google.genai import types
 
 # Load variables from .env file into environment
-load_dotenv()
+# Explicitly load from backend directory
+backend_dir = Path(__file__).parent.parent.parent
+env_path = backend_dir / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
 
 # Fetch key from environment
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# Configure Gemini
+# We no longer configure globally, but instantiate the client.
 _api_configured = False
 if GEMINI_API_KEY and GEMINI_API_KEY != "your-gemini-api-key":
-    genai.configure(api_key=GEMINI_API_KEY)
     _api_configured = True
     print(f"Gemini API configured successfully")
 else:
@@ -48,16 +53,14 @@ Format responses using Markdown with proper code blocks."""
     def __init__(self):
         if _api_configured:
             try:
-                self.model = genai.GenerativeModel(
-                    model_name="gemini-3-flash-preview",
-                )
-                print("Gemini model initialized successfully")
+                self.client = genai.Client(api_key=GEMINI_API_KEY)
+                print("Gemini client initialized successfully")
             except Exception as e:
-                print(f"Failed to initialize Gemini model: {e}")
-                self.model = None
+                print(f"Failed to initialize Gemini client: {e}")
+                self.client = None
         else:
-            self.model = None
-            print("Gemini model not initialized - API not configured")
+            self.client = None
+            print("Gemini client not initialized - API not configured")
     
     async def generate_response(
         self,
@@ -66,15 +69,13 @@ Format responses using Markdown with proper code blocks."""
         context: Optional[str] = None,
     ) -> str:
         """Generate a response from the AI model with optional RAG context."""
-        if self.model is None:
-            return "⚠️ **Gemini API not configured**\n\nTo enable AI responses, please add your Gemini API key to the `.env` file:\n\n```\nGEMINI_API_KEY=your-actual-api-key-here\n```\n\nYou can get an API key from [Google AI Studio](https://aistudio.google.com/)."
+        if self.client is None:
+            return "⚠️ **Gemini API not configured or failed to initialize**\n\nTo enable AI responses, please add your valid Gemini API key to the `.env` file:\n\n```\nGEMINI_API_KEY=your-actual-api-key-here\n```\n\nYou can get an API key from [Google AI Studio](https://aistudio.google.com/)."
         
         try:
             # Build the prompt with optional context
             if context:
-                full_message = f"""{self.SYSTEM_PROMPT}
-
-The following code snippets from the repository are relevant to the user's question:
+                full_message = f"""The following code snippets from the repository are relevant to the user's question:
 
 {context}
 
@@ -82,23 +83,29 @@ Use this context to provide accurate, repository-aware answers. Reference specif
 
 User: {message}"""
             else:
-                full_message = f"{self.SYSTEM_PROMPT}\n\nUser: {message}"
+                full_message = message
             
             # Build conversation history
             history = []
             if chat_history:
                 for msg in chat_history:
                     role = "user" if msg["role"] == "user" else "model"
-                    history.append({"role": role, "parts": [msg["content"]]})
+                    history.append(types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])]))
             
-            # Start chat session
-            chat = self.model.start_chat(history=history)
+            # Create chat session using async client
+            chat = self.client.aio.chats.create(
+                model="gemini-3-flash-preview",
+                config=types.GenerateContentConfig(
+                    system_instruction=self.SYSTEM_PROMPT
+                ),
+                history=history if history else None
+            )
             
             # Generate response
-            response = await chat.send_message_async(full_message)
+            response = await chat.send_message(full_message)
             return response.text
         except Exception as e:
-            return f"I apologize, but I encountered an error: {str(e)}\n\nPlease check if the Gemini API key is configured correctly."
+            return f"I apologize, but I encountered an error: {repr(e)}\n\nPlease check if the Gemini API key is configured correctly and has valid permissions."
     
     async def stream_response(
         self,
@@ -107,16 +114,14 @@ User: {message}"""
         context: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """Stream a response from the AI model with optional RAG context."""
-        if self.model is None:
-            yield "⚠️ **Gemini API not configured**\n\nTo enable AI responses, please add your Gemini API key to the `.env` file.\n\nGet your key from [Google AI Studio](https://aistudio.google.com/)."
+        if self.client is None:
+            yield "⚠️ **Gemini API not configured or failed to initialize**\n\nTo enable AI responses, please add your Gemini API key to the `.env` file.\n\nGet your key from [Google AI Studio](https://aistudio.google.com/)."
             return
         
         try:
             # Build the prompt with optional context
             if context:
-                full_message = f"""{self.SYSTEM_PROMPT}
-
-The following code snippets from the repository are relevant to the user's question:
+                full_message = f"""The following code snippets from the repository are relevant to the user's question:
 
 {context}
 
@@ -124,22 +129,28 @@ Use this context to provide accurate, repository-aware answers. Reference specif
 
 User: {message}"""
             else:
-                full_message = f"{self.SYSTEM_PROMPT}\n\nUser: {message}"
+                full_message = message
             
             # Build conversation history
             history = []
             if chat_history:
                 for msg in chat_history:
                     role = "user" if msg["role"] == "user" else "model"
-                    history.append({"role": role, "parts": [msg["content"]]})
+                    history.append(types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])]))
             
-            # Start chat session
-            chat = self.model.start_chat(history=history)
+            # Create chat session using async client
+            chat = self.client.aio.chats.create(
+                model="gemini-3-flash-preview",
+                config=types.GenerateContentConfig(
+                    system_instruction=self.SYSTEM_PROMPT
+                ),
+                history=history if history else None
+            )
             
             # Generate streaming response
-            response = await chat.send_message_async(full_message, stream=True)
+            response_stream = await chat.send_message_stream(full_message)
             
-            async for chunk in response:
+            async for chunk in response_stream:
                 if chunk.text:
                     yield chunk.text
         except Exception as e:

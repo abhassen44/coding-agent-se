@@ -51,8 +51,8 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
                     models = [m["name"] for m in resp.json().get("models", [])]
                     self._available = any(self.model in m for m in models)
                     return self._available
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ Ollama connection check failed: {e}")
         self._available = False
         return False
 
@@ -96,8 +96,11 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
         if not await self._check_available():
             return (
                 "⚠️ **Ollama not available**\n\n"
-                f"Make sure Ollama is running (`ollama serve`) and the model `{self.model}` is pulled.\n\n"
-                f"```\nollama pull {self.model}\n```"
+                f"Make sure Ollama is running and the model `{self.model}` is pulled.\n\n"
+                f"**To start Ollama:**\n"
+                f"```bash\nollama serve\n```\n\n"
+                f"**To pull the model:**\n"
+                f"```bash\nollama pull {self.model}\n```"
             )
 
         messages = self._build_messages(message, chat_history, context)
@@ -113,13 +116,17 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
                         "options": {"temperature": 0.7},
                     },
                 )
+                if resp.status_code != 200:
+                    return f"⚠️ **Ollama error:** HTTP {resp.status_code} - {resp.text[:200]}"
                 resp.raise_for_status()
                 data = resp.json()
                 return data.get("message", {}).get("content", "No response received.")
+        except httpx.ConnectError:
+            return f"⚠️ **Cannot connect to Ollama** at {self.base_url}\n\nMake sure Ollama is running: `ollama serve`"
         except httpx.TimeoutException:
-            return "⚠️ **Request timed out** — Qwen is taking too long. The model may still be loading."
+            return "⚠️ **Request timed out** — Qwen is taking too long to respond. The model may still be loading."
         except Exception as e:
-            return f"⚠️ **Ollama error:** {str(e)}"
+            return f"⚠️ **Ollama error:** {type(e).__name__}: {str(e)}"
 
     async def stream_response(
         self,
@@ -130,7 +137,8 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
         """Stream a response from Qwen via Ollama."""
         if not await self._check_available():
             yield (
-                f"⚠️ **Ollama not available** — run `ollama serve` and `ollama pull {self.model}`"
+                f"⚠️ **Ollama not available**\n\n"
+                f"Run `ollama serve` and `ollama pull {self.model}`"
             )
             return
 
@@ -148,6 +156,9 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
                         "options": {"temperature": 0.7},
                     },
                 ) as resp:
+                    if resp.status_code != 200:
+                        yield f"⚠️ **Ollama error:** HTTP {resp.status_code}"
+                        return
                     resp.raise_for_status()
                     import json
                     async for line in resp.aiter_lines():
@@ -159,8 +170,12 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
                                     yield content
                             except json.JSONDecodeError:
                                 continue
+        except httpx.ConnectError:
+            yield f"⚠️ **Cannot connect to Ollama** at {self.base_url}\n\nMake sure Ollama is running: `ollama serve`"
+        except httpx.TimeoutException:
+            yield "⚠️ **Request timed out** — Ollama is taking too long to respond."
         except Exception as e:
-            yield f"Error: {str(e)}"
+            yield f"⚠️ **Error:** {type(e).__name__}: {str(e)}"
 
     async def generate_code(
         self,
