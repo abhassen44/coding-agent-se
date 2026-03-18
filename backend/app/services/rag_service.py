@@ -315,6 +315,7 @@ class RAGService:
         
         # Get repository name if specified
         repo_name = None
+        repo_info = ""
         if repository_id:
             repo_result = await self.db.execute(
                 select(Repository).where(Repository.id == repository_id)
@@ -322,9 +323,21 @@ class RAGService:
             repo = repo_result.scalar_one_or_none()
             if repo:
                 repo_name = repo.name
+                repo_desc = f"\nDescription: {repo.description}" if repo.description else ""
+                
+                from sqlalchemy import func
+                file_count = await self.db.scalar(select(func.count(File.id)).where(File.repository_id == repository_id))
+                
+                repo_info = f"Repository Context:\nName: {repo_name}{repo_desc}\nTotal Files: {file_count or 0}\n\n"
         
+        final_context = ""
+        if repo_info:
+            final_context += repo_info
+        if context_parts:
+            final_context += "Relevant Code Snippets:\n" + "\n\n".join(context_parts)
+            
         return ContextResponse(
-            context="\n\n".join(context_parts) if context_parts else "",
+            context=final_context,
             chunks=chunk_responses,
             repository_name=repo_name
         )
