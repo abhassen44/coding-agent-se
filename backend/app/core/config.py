@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     file_storage_path: str = "./storage/files"
     
     # Redis
-    redis_url: str = "redis://localhost:6379"
+    redis_url: str = "redis://localhost:6380"
     
     class Config:
         env_file = ".env"
