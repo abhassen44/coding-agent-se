@@ -6,7 +6,9 @@ import { useState } from "react";
 
 const navItems = [
     { icon: "💬", label: "Chat", href: "/chat" },
+    { icon: "▶️", label: "Execution", href: "/execute" },
     { icon: "📁", label: "Repository", href: "/repository" },
+    { icon: "🖥️", label: "Workspace", href: "/workspace" },
     { icon: "📤", label: "Upload", href: "/upload" },
 ];
 
@@ -105,7 +107,7 @@ export default function Sidebar() {
                 <div className="p-4 border-t border-[#1F2D28]">
                     <div className="flex items-center justify-between text-xs text-[#5A7268]">
                         <span>ICA v1.0</span>
-                        <span className="px-2 py-0.5 bg-[#1A2420] rounded-lg">Phase 3</span>
+                        <span className="px-2 py-0.5 bg-[#1A2420] rounded-lg">Phase 4</span>
                     </div>
                 </div>
             </aside>

@@ -1,4 +1,6 @@
 from app.models.user import User, UserRole
 from app.models.file import Repository, File, FileChunk
+from app.models.execution import Execution
+from app.models.workspace import Workspace
 
-__all__ = ["User", "UserRole", "Repository", "File", "FileChunk"]
+__all__ = ["User", "UserRole", "Repository", "File", "FileChunk", "Execution", "Workspace"]

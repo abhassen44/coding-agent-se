@@ -8,24 +8,63 @@
 
 | Phase | Name | Status | Details |
 |-------|------|--------|---------|
-| **Phase 1** | Foundation — Auth, User roles, Basic chat UI, Basic AI chat | ✅ Completed | `auth.py` API, `auth_service.py`, User model with roles, JWT auth, login/register pages |
-| **Phase 2** | Code Intelligence — Code generation, Explanation, Debugging, Markdown rendering | ✅ Completed | `gemini_service.py`, `qwen_service.py`, chat with AI, `MessageBubble.tsx` with markdown |
-| **Phase 3** | File & RAG — File uploads, Repo indexing, Context-aware answers | ✅ Completed | `files.py` API, `repository.py` API, `rag_service.py`, `github_service.py`, `file_service.py`, Qdrant vector DB, file upload UI (`FileUpload.tsx`), repo import with progress bar, `FileTree.tsx`, `CodeViewer.tsx`, `ContextPanel.tsx` |
-| **Phase 4** | Execution Engine — Sandboxed runners, Output capture, Error diagnostics | ❌ Not Started | No execution/sandbox/runner code implemented yet |
-| **Phase 5** | Automation — Task definitions, Workflow execution, Scheduling | ❌ Not Started | No task/workflow/scheduling code implemented yet |
-| **Phase 6** | Admin Panel — User management, Logs & monitoring, System settings | ❌ Not Started | No admin panel code implemented yet |
+| **Phase 1** | Foundation — Auth, User roles, Basic chat UI, Basic AI chat | ✅ Completed | JWT auth, login/register, role-based access, FastAPI + Next.js |
+| **Phase 2** | Code Intelligence — Code generation, Explanation, Debugging, Markdown rendering | ✅ Completed | Gemini + Qwen AI, syntax-highlighted code blocks, multi-turn chat |
+| **Phase 3** | File & RAG — File uploads, Repo indexing, Context-aware answers | ✅ Completed | GitHub import, Qdrant vector DB, RAG pipeline, file tree/code viewer |
+| **Phase 4.0** | Snippet Runner (lightweight) | ✅ Completed | Quick code execution via Docker, `/execute` page, ▶ Run button in chat |
+| **Phase 4A** | Sandbox Workspace — Container per project | ✅ Completed | Workspace model, WorkspaceService with Docker lifecycle + file API, 11 REST endpoints, Open Workspace button |
+| **Phase 4B** | Web Code Editor — Monaco/VS Code in browser | ✅ Completed | Monaco editor, multi-tab editing, file tree, create/edit/save/delete |
+| **Phase 4C** | Terminal & Commands — Shell inside sandbox | ✅ Completed | WebSocket terminal via Docker exec, xterm.js UI, toggle panel |
+| **Phase 4D** | AI Agent in Sandbox — AI reads/writes/runs in workspace | ✅ Completed | Smart Qwen/Gemini routing, structured JSON actions, accept/reject flow, workspace chat panel |
+| **Phase 4E** | Live Preview — See the app running | ❌ Not Started | Port forwarding, iframe preview, auto-reload, dev server management |
+| **Phase 5** | Automation — Task definitions, Workflow execution, Scheduling | ❌ Not Started | Multi-step tasks, background execution, cron triggers |
+| **Phase 6** | Admin Panel — User management, Logs & monitoring, System settings | ❌ Not Started | User CRUD, system logs, config dashboard |
 
 ---
 
-## Current Position: 🎯 Start of Phase 4 — Execution Engine
+## Current Position: 🎯 Phase 4A — Sandbox Workspace
 
-### Phase 4 Requirements
+---
 
-- 🔧 **Sandboxed code runners** — Docker-based isolation for safe code execution
-- 📤 **Output capture** — Capture stdout / stderr from executed code
-- 🛡️ **Resource limits** — Time, CPU, and memory constraints
-- 🐛 **Error diagnostics** — Integrate error analysis with AI for debugging support
-- 🔒 **Security** — Command allow-list, no destructive operations, execution timeout enforced
+## Phase 4 Sub-phases (Bolt/Lovable-style Workspace)
+
+### Phase 4.0 — Snippet Runner ✅ (already built)
+- Run isolated code snippets in Docker (Python, JS, C++, Java)
+- `/execute` page with editor, output panels, history
+- ▶ Run button on code blocks in chat
+- AI error diagnostics
+
+### Phase 4A — Sandbox Workspace Foundation 🔶
+- **Docker container per project** — persistent workspace from an imported repo
+- **File system API** — list, read, write, create, delete files inside the container
+- **Workspace lifecycle** — create, start, stop, destroy workspaces
+- **Mount imported repo** into the container with read/write access
+
+### Phase 4B — Web Code Editor
+- **Monaco Editor** integration (VS Code in browser)
+- **File tree** connected to the sandbox filesystem
+- **Multi-tab editing** with syntax highlighting
+- **Save** changes back to the sandbox container
+- **Create/rename/delete** files and folders
+
+### Phase 4C — Terminal & Command Execution
+- **WebSocket-based terminal** connected to the sandbox shell
+- **Run commands** — `npm install`, `pip install`, `build`, `test`, etc.
+- **Live streaming output** via WebSocket
+- **Process management** — start/stop/restart processes
+
+### Phase 4D — AI Agent in Sandbox
+- **AI reads workspace files** — understands the full project
+- **AI writes/modifies files** — generates code changes directly
+- **AI runs commands** — install deps, build, test
+- **Accept/reject/edit flow** — user reviews AI changes before applying
+- **Context-aware from RAG + live files**
+
+### Phase 4E — Live Preview
+- **Port forwarding** from sandbox container to host
+- **iframe preview** of the running app in the UI
+- **Auto-reload** on file changes
+- **Dev server management** — start/stop the app inside sandbox
 
 ---
 
@@ -52,17 +91,9 @@
 - File tree browsing, code viewer, and context panel components
 - Re-indexing support
 
----
-
-## Upcoming Phases
-
-### Phase 5 — Automation
-- Define multi-step tasks (build → test → run → analyze)
-- Background execution
-- Manual or scheduled triggers
-- Task status tracking & execution logs
-
-### Phase 6 — Admin Panel
-- User management
-- Logs & monitoring
-- System settings configuration
+### Phase 4.0 — Snippet Runner ✅
+- Docker sandbox execution (Python, JS, C++, Java)
+- `/execute` page with code editor, output panels, history sidebar
+- ▶ Run button on chat code blocks with inline results
+- AI error diagnostics via Gemini
+- Resource limits (10s timeout, 256MB memory, 50% CPU)

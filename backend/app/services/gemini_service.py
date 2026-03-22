@@ -96,7 +96,8 @@ User: {message}"""
             chat = self.client.aio.chats.create(
                 model="gemini-3-flash-preview",
                 config=types.GenerateContentConfig(
-                    system_instruction=self.SYSTEM_PROMPT
+                    system_instruction=self.SYSTEM_PROMPT,
+                    max_output_tokens=8192,
                 ),
                 history=history if history else None
             )
@@ -217,6 +218,37 @@ Provide:
 3. Explanation of what was wrong
 4. Tips to prevent similar issues"""
         
+        return await self.generate_response(prompt)
+
+    async def diagnose_execution_error(
+        self,
+        code: str,
+        language: str,
+        stderr: str,
+        exit_code: Optional[int] = None,
+    ) -> str:
+        """Diagnose a code execution error using AI."""
+        prompt = f"""Analyze this failed code execution and provide a diagnostic:
+
+**Language:** {language}
+**Exit Code:** {exit_code}
+
+**Code:**
+```{language}
+{code}
+```
+
+**Error Output (stderr):**
+```
+{stderr}
+```
+
+Provide:
+1. **Root Cause** — What caused the error
+2. **Fix** — Corrected code with the issue resolved
+3. **Explanation** — Why the fix works
+4. **Prevention** — Tips to avoid similar errors"""
+
         return await self.generate_response(prompt)
 
 

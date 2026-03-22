@@ -15,11 +15,16 @@ class Settings(BaseSettings):
     # JWT
     secret_key: str = "your-secret-key-change-in-production"
     algorithm: str = "HS256"
-    access_token_expire_minutes: int = 30
-    refresh_token_expire_days: int = 7
+    access_token_expire_minutes: int = 10080  # 7 days
+    refresh_token_expire_days: int = 30
     
     # Gemini AI
     gemini_api_key: str = "AIzaSyASkkNan6_gAr15Ocy4L7eF9yzY05zq3Wg"
+    
+    # AWS Bedrock
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_region: str = "ap-south-1"
     
     github_token: str = ""
     # Vector DB
@@ -32,6 +37,14 @@ class Settings(BaseSettings):
     
     # Redis
     redis_url: str = "redis://localhost:6380"
+    
+    # Execution Engine
+    execution_timeout: int = 10
+    execution_memory_limit: str = "256m"
+    execution_cpu_quota: int = 50000
+    
+    # Workspace
+    workspace_base_image: str = "node:20-bookworm"
     
     class Config:
         env_file = ".env"
