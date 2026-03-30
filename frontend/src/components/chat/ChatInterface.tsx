@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import MessageBubble from "./MessageBubble";
 import { apiClient, ChatMessage as ApiChatMessage } from "@/lib/api";
 
@@ -44,6 +45,8 @@ export default function ChatInterface() {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const searchParams = useSearchParams();
+    const router = useRouter();
 
     const getToken = () => {
         if (typeof window !== "undefined") {
@@ -96,6 +99,46 @@ export default function ChatInterface() {
     useEffect(() => {
         scrollToBottom();
     }, [messages, streamingContent]);
+
+    // Auto-submit query from global search bar (?q=...)
+    useEffect(() => {
+        const q = searchParams.get("q");
+        if (!q) return;
+        // Remove the param from URL without re-render
+        router.replace("/chat", { scroll: false });
+        // Set and submit
+        setInput(q);
+        setTimeout(() => {
+            const syntheticEvent = { preventDefault: () => {} } as React.FormEvent;
+            // Trigger via direct call to avoid stale closure
+            const userMessage: Message = {
+                id: Date.now().toString(),
+                role: "user",
+                content: q,
+                timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, userMessage]);
+            setInput("");
+            setIsLoading(true);
+            setStreamingContent("");
+            const history: ApiChatMessage[] = INITIAL_MESSAGES.slice(-10).map(msg => ({
+                role: msg.role,
+                content: msg.content,
+            }));
+            apiClient.sendMessage({ message: q, session_id: undefined, history, repository_id: undefined, provider: "gemini" })
+                .then(response => {
+                    const aiMessage: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: response.message, timestamp: new Date() };
+                    setMessages(prev => [...prev, aiMessage]);
+                    setSessionId(response.session_id);
+                })
+                .catch(err => {
+                    const errMsg: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: `⚠️ Error: ${err?.message || "Unknown error"}`, timestamp: new Date() };
+                    setMessages(prev => [...prev, errMsg]);
+                })
+                .finally(() => { setIsLoading(false); setStreamingContent(""); });
+        }, 100);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);

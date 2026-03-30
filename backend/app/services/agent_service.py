@@ -87,7 +87,9 @@ You MUST follow this chain of thought for every request:
 ## Critical Rules
 - **ALWAYS explore first.** Never make assumptions about file structure.
 - **Use MULTIPLE tool calls** across multiple turns. Iterate like a real developer.
+- **No Introductory Chatter before Tools:** If you need to use a tool, output the tool call IMMEDIATELY. Do not say "Let me look at the README" and then call the tool. Just call the tool.
 - **Use search_code** to find things instead of reading every file manually.
+- **If a file is not in the root directory, IMMEDIATELY call find_files('filename') to locate it.**
 - **Your final message MUST be text** — a comprehensive summary with no tool calls.
 - **Complete files only** when using `write_file`.
 - **Do NOT use `<think>` tags.** Respond directly."""
@@ -440,17 +442,37 @@ class AgentService:
                     nudge_count < MAX_NUDGES
                 )
                 
-                if is_premature or claims_not_found:
+                # Detect stating intent without calling a tool
+                is_premature_stop = (
+                    ("let me read" in content_lower or
+                     "i will read" in content_lower or
+                     "let me check" in content_lower or
+                     "i'll check" in content_lower or
+                     "let me use" in content_lower or
+                     "i will use" in content_lower or
+                     "let me search" in content_lower or
+                     "i will search" in content_lower or
+                     "let me find" in content_lower or
+                     "i will find" in content_lower or
+                     "let me look" in content_lower or
+                     "i will look" in content_lower) and
+                    nudge_count < MAX_NUDGES
+                )
+                
+                if is_premature or claims_not_found or is_premature_stop:
                     nudge_count += 1
-                    logger.info(f"Nudging agent (nudge {nudge_count}/{MAX_NUDGES}): has_explored={has_explored}, claims_not_found={claims_not_found}")
+                    logger.info(f"Nudging agent (nudge {nudge_count}/{MAX_NUDGES}): has_explored={has_explored}, claims={claims_not_found}, stop={is_premature_stop}")
                     
-                    nudge_msg = (
-                        "STOP — you have NOT explored the workspace yet. "
-                        "You MUST call `list_files('.')` first to see the project structure, "
-                        "then use `search_code` or `find_files` to locate the relevant file. "
-                        "Do NOT claim a file doesn't exist without searching for it. "
-                        "Explore the workspace now."
-                    )
+                    if is_premature_stop:
+                        nudge_msg = "DO NOT STOP! You MUST call the tool immediately instead of just saying you will."
+                    else:
+                        nudge_msg = (
+                            "STOP — you have NOT explored the workspace yet. "
+                            "You MUST call `list_files('.')` first to see the project structure, "
+                            "then use `search_code` or `find_files` to locate the relevant file. "
+                            "Do NOT claim a file doesn't exist without searching for it. "
+                            "Explore the workspace now."
+                        )
                     
                     # Return the agent's response + a nudge to keep going
                     return {"messages": [
@@ -545,12 +567,7 @@ class AgentService:
         file_paths: Optional[List[str]] = None,
         provider: str = "auto",
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """Run the agent with real-time token streaming via manual loop.
-        
-        Instead of relying on LangGraph's astream_events (unreliable for
-        some providers), this directly calls model.astream() for token
-        output and manually executes tools — matching Beatcode's pattern.
-        """
+        """Run the agent with real-time token streaming via manual loop."""
 
         # Create workspace-bound tools (8 tools)
         tools = create_workspace_tools(self.workspace_service, workspace_id, user_id)
@@ -578,127 +595,57 @@ class AgentService:
         nudge_count = 0
         MAX_NUDGES = 3
         tools_used: set[str] = set()
+        # ── FIX 1: Track (tool_name, key_arg) pairs to deduplicate identical calls ──
+        tool_calls_made: set[tuple] = set()
         EXPLORATION_TOOLS = {"list_files", "read_file", "read_file_lines", "search_code", "find_files"}
         collected_actions: List[AgentAction] = []
-        inside_think = False  # Track <think> blocks across chunks
+        inside_think = False
+        # ── FIX 2: Track last content to detect infinite repeat loops ──
+        last_full_content = ""
+        repeat_content_count = 0
+        MAX_REPEAT_CONTENT = 2  # If the agent emits the same text twice, break the loop
 
         try:
             while iteration_count < self.MAX_ITERATIONS:
                 iteration_count += 1
                 logger.info(f"Agent streaming iteration {iteration_count}/{self.MAX_ITERATIONS}")
 
-                # ── Stream LLM response token-by-token ──
-                full_content = ""
-                full_tool_calls = []
+                # ── Use standard invoke instead of manual token streaming for stability ──
+                # Manual token streaming with tool calls is notoriously unstable across 
+                # different providers (Gemini vs HuggingFace vs Ollama).
+                # We will yield a status, await the full response, then stream the result.
+                yield {"type": "status", "status": f"thinking (step {iteration_count})"}
                 
-                async for chunk in model_with_tools.astream(messages):
-                    # Extract text content
-                    if chunk.content:
-                        text = chunk.content
-                        if isinstance(text, list):
-                            text = "".join(str(t) for t in text)
-                        
-                        # Track <think> blocks across chunks (Qwen)
-                        if "<think>" in text:
-                            inside_think = True
-                            text = text.split("<think>")[0]  # Keep text before <think>
-                        if "</think>" in text:
-                            inside_think = False
-                            text = text.split("</think>", 1)[-1]  # Keep text after </think>
-                        
-                        if not inside_think and text:
-                            full_content += text
-                            yield {"type": "token", "content": text}
-                    
-                    # Accumulate tool calls from chunks
-                    if hasattr(chunk, "tool_call_chunks") and chunk.tool_call_chunks:
-                        for tc_chunk in chunk.tool_call_chunks:
-                            idx = tc_chunk.get("index")
-                            if idx is None:
-                                idx = 0
-                            
-                            while len(full_tool_calls) <= idx:
-                                full_tool_calls.append({"name": "", "args": "", "id": ""})
-                            if tc_chunk.get("name"):
-                                full_tool_calls[idx]["name"] = tc_chunk["name"]
-                            if tc_chunk.get("args"):
-                                full_tool_calls[idx]["args"] += tc_chunk["args"]
-                            if tc_chunk.get("id"):
-                                full_tool_calls[idx]["id"] = tc_chunk["id"]
-                    
-                    # Also check for complete tool_calls on the chunk (some providers send complete)
-                    if hasattr(chunk, "tool_calls") and chunk.tool_calls:
-                        for tc in chunk.tool_calls:
-                            # Only add if not already tracked
-                            if tc not in full_tool_calls:
-                                full_tool_calls.append(tc)
+                import asyncio
+                try:
+                    response_msg = await model_with_tools.ainvoke(messages)
+                except Exception as e:
+                    yield {"type": "error", "message": f"LLM error: {str(e)}"}
+                    break
 
-                # Clean the accumulated content
+                # Extract and clean text
+                full_content = response_msg.content or ""
+                if isinstance(full_content, list):
+                    full_content = "".join(str(c) for c in full_content)
                 full_content = _clean_think_tags(full_content)
+
+                # Emit the cleaned text token by token for the frontend UX
+                if full_content:
+                    # Optional: chunk the text artificially for smooth UI streaming
+                    words = full_content.split(" ")
+                    for word in words:
+                        yield {"type": "token", "content": word + " "}
+                        await asyncio.sleep(0.01) # Small delay for UI effect
+
+                messages.append(response_msg)
                 
-                # Parse accumulated tool call args (they come as JSON strings from chunks)
-                parsed_tool_calls = []
-                for tc in full_tool_calls:
-                    if isinstance(tc, dict):
-                        name = tc.get("name", "")
-                        args = tc.get("args", {})
-                        tc_id = tc.get("id", "")
-                        if isinstance(args, str):
-                            try:
-                                args = json.loads(args) if args else {}
-                            except json.JSONDecodeError:
-                                args = {}
-                        if not tc_id:
-                            # Generate an ID if the chunk didn't supply one, which many models do
-                            tc_id = f"call_{name}_{iteration_count}_{len(parsed_tool_calls)}"
-                        if name:
-                            parsed_tool_calls.append({"name": name, "args": args, "id": tc_id, "type": "tool_call"})
-                    elif hasattr(tc, "get"):
-                        # Already a proper tool call dict from LangChain
-                        if not tc.get("id"):
-                            tc["id"] = f"call_{tc.get('name', 'unknown')}_{iteration_count}_{len(parsed_tool_calls)}"
-                        if "type" not in tc:
-                            tc["type"] = "tool_call"
-                        parsed_tool_calls.append(tc)
-
-                # Sanitize tool calls to prevent strict schema validation failures in downstream APIs
-                for tc in parsed_tool_calls:
-                    t_name = tc.get("name", "")
-                    t_args = tc.get("args", {})
-                    if not isinstance(t_args, dict):
-                        tc["args"] = t_args = {}
-                    
-                    if t_name == "read_file" and "path" not in t_args:
-                        t_args["path"] = ""
-                    elif t_name == "read_file_lines":
-                        if "path" not in t_args: t_args["path"] = ""
-                        if "start_line" not in t_args: t_args["start_line"] = 1
-                        if "end_line" not in t_args: t_args["end_line"] = 100
-                    elif t_name == "search_code" and "pattern" not in t_args:
-                        t_args["pattern"] = ""
-                    elif t_name == "find_files" and "pattern" not in t_args:
-                        t_args["pattern"] = ""
-                    elif t_name == "write_file":
-                        if "path" not in t_args: t_args["path"] = ""
-                        if "content" not in t_args: t_args["content"] = ""
-                    elif t_name == "delete_file" and "path" not in t_args:
-                        t_args["path"] = ""
-                    elif t_name == "run_command" and "command" not in t_args:
-                        t_args["command"] = ""
-
-                logger.info(f"Agent step {iteration_count}: content_len={len(full_content)}, tool_calls={len(parsed_tool_calls)}, tools_used={tools_used}")
-
-                # Build the full AIMessage for conversation history
-                ai_message = AIMessage(
-                    content=full_content,
-                    tool_calls=parsed_tool_calls if parsed_tool_calls else [],
-                )
-                messages.append(ai_message)
+                # Extract reliable tool calls from the completed message
+                parsed_tool_calls = response_msg.tool_calls or []
 
                 # ── If tool calls, execute them ──
                 if parsed_tool_calls:
                     for tc in parsed_tool_calls:
-                        tool_name = tc.get("name", tc.get("name", "unknown"))
+                        tool_name = tc.get("name", "unknown")
                         tool_args = tc.get("args", {})
                         tool_id = tc.get("id") or f"call_{tool_name}_{iteration_count}"
                         tools_used.add(tool_name)
@@ -755,44 +702,68 @@ class AgentService:
                     # Continue to next iteration (agent sees tool results)
                     continue
 
-                # ── No tool calls — check nudge logic ──
-                if full_content:
-                    has_explored = bool(tools_used & EXPLORATION_TOOLS)
-                    content_lower = full_content.lower()
+                # ── Evaluate Nudges ONLY if no tools were called ──
+                content_lower = full_content.lower()
+                has_explored = bool(tools_used & EXPLORATION_TOOLS)
 
-                    is_premature = (
-                        not has_explored and
-                        nudge_count < MAX_NUDGES and
-                        iteration_count < self.MAX_ITERATIONS - 2
-                    )
-                    claims_not_found = (
-                        ("does not exist" in content_lower or
-                         "not found" in content_lower or
-                         "couldn't find" in content_lower or
-                         "could not find" in content_lower or
-                         "no such file" in content_lower) and
-                        "search_code" not in tools_used and
-                        "find_files" not in tools_used and
-                        "list_files" not in tools_used and
-                        nudge_count < MAX_NUDGES
-                    )
+                # Are they trying to stop without doing anything?
+                is_premature_stop = (
+                    not has_explored and 
+                    nudge_count < MAX_NUDGES and 
+                    iteration_count < self.MAX_ITERATIONS - 1
+                )
+                
+                # Are they promising to do something but outputting raw text instead of a tool call?
+                promises_action = (
+                    any(phrase in content_lower for phrase in [
+                        "let me read", "i will read", "let me search", 
+                        "i will search", "let me check", "i'll run", "let me find", "i will find"
+                    ]) and nudge_count < MAX_NUDGES
+                )
 
-                    if is_premature or claims_not_found:
-                        nudge_count += 1
-                        logger.info(f"Nudging agent (nudge {nudge_count}/{MAX_NUDGES})")
-                        nudge_msg = (
-                            "STOP — you have NOT explored the workspace yet. "
-                            "You MUST call `list_files('.')` first to see the project structure, "
-                            "then use `search_code` or `find_files` to locate the relevant file. "
-                            "Do NOT claim a file doesn't exist without searching for it. "
-                            "Explore the workspace now."
-                        )
-                        messages.append(HumanMessage(content=nudge_msg))
-                        yield {"type": "status", "status": "nudging"}
-                        continue
+                if is_premature_stop or promises_action:
+                    nudge_count += 1
+                    nudge_msg = (
+                        "SYSTEM: You stated an intent to check/read something but did not actually output a tool call. "
+                        "You MUST output a valid JSON tool call right now. Do not write introductory text."
+                    )
+                    messages.append(HumanMessage(content=nudge_msg))
+                    yield {"type": "status", "status": "nudging"}
+                    continue
 
                 # ── Agent finished (no tool calls, no nudge) ──
                 break
+
+            # If the agent didn't produce a proper text summary, force one more call
+            if not full_content.strip() or full_content.startswith("Here's what I found:"):
+                try:
+                    logger.info("Agent didn't produce summary in stream — forcing summary call")
+                    summary_messages = messages + [
+                        HumanMessage(content="Now provide a clear, well-formatted markdown summary of everything you found and did. Do NOT call any tools, just respond with text.")
+                    ]
+                    
+                    yield {"type": "status", "status": "synthesizing", "model": model_name}
+                    
+                    inside_summary_think = False
+                    
+                    async for chunk in llm.astream(summary_messages):
+                        if chunk.content:
+                            text = chunk.content
+                            if isinstance(text, list):
+                                text = "".join(str(t) for t in text)
+                            
+                            if "<think>" in text:
+                                inside_summary_think = True
+                                text = text.split("<think>")[0]
+                            if "</think>" in text:
+                                inside_summary_think = False
+                                text = text.split("</think>", 1)[-1]
+                                
+                            if not inside_summary_think and text:
+                                yield {"type": "token", "content": text}
+                                
+                except Exception as e:
+                    logger.warning(f"Summary streaming call failed: {e}")
 
             # Stream complete
             yield {
@@ -816,9 +787,8 @@ class AgentService:
         messages = state["messages"]
         explanation = ""
         actions = []
-        steps = []  # Track tool usage steps for transparency
+        steps = []
 
-        # Collect steps taken (for logging)
         for msg in messages:
             if isinstance(msg, AIMessage) and msg.tool_calls:
                 for tc in msg.tool_calls:
@@ -827,7 +797,6 @@ class AgentService:
         if steps:
             logger.info(f"Agent took {len(steps)} tool steps: {steps}")
 
-        # Find the final AI response (last AI message without tool calls)
         for msg in reversed(messages):
             if isinstance(msg, AIMessage):
                 content = _clean_think_tags(msg.content) if msg.content else ""
@@ -835,7 +804,6 @@ class AgentService:
                     explanation = content
                     break
 
-        # Fallback: any AI message with content
         if not explanation:
             for msg in reversed(messages):
                 if isinstance(msg, AIMessage) and msg.content:
@@ -844,7 +812,6 @@ class AgentService:
                         explanation = content
                         break
 
-        # Fallback: build from tool results
         if not explanation:
             tool_summaries = []
             for msg in messages:
@@ -853,7 +820,6 @@ class AgentService:
             if tool_summaries:
                 explanation = "Here's what I found:\n\n" + "\n\n".join(tool_summaries)
 
-        # Extract modification actions from tool calls
         for msg in messages:
             if isinstance(msg, AIMessage) and msg.tool_calls:
                 for tc in msg.tool_calls:

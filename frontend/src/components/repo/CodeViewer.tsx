@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import Prism from 'prismjs';
+import 'prismjs/themes/prism-tomorrow.css';
 
 // Import common language syntax highlighting
 import 'prismjs/components/prism-python';
@@ -100,7 +101,7 @@ export default function CodeViewer({
                     </code>
                 </pre>
             </div>
-            <style jsx>{`
+            <style>{`
         .code-viewer {
           height: 100%;
           display: flex;

@@ -15,7 +15,7 @@
 | **Phase 4A** | Sandbox Workspace — Container per project | ✅ Completed | Workspace model, WorkspaceService with Docker lifecycle + file API, 11 REST endpoints, Open Workspace button |
 | **Phase 4B** | Web Code Editor — Monaco/VS Code in browser | ✅ Completed | Monaco editor, multi-tab editing, file tree, create/edit/save/delete |
 | **Phase 4C** | Terminal & Commands — Shell inside sandbox | ✅ Completed | WebSocket terminal via Docker exec, xterm.js UI, toggle panel |
-| **Phase 4D** | AI Agent in Sandbox — AI reads/writes/runs in workspace | ✅ Completed | Smart Qwen/Gemini routing, structured JSON actions, accept/reject flow, workspace chat panel |
+| **Phase 4D** | AI Agent in Sandbox — AI reads/writes/runs in workspace | ✅ Completed | Smart Qwen/Gemini routing, structured JSON actions, accept/reject flow, workspace chat panel | 
 | **Phase 4E** | Live Preview — See the app running | ❌ Not Started | Port forwarding, iframe preview, auto-reload, dev server management |
 | **Phase 5** | Automation — Task definitions, Workflow execution, Scheduling | ❌ Not Started | Multi-step tasks, background execution, cron triggers |
 | **Phase 6** | Admin Panel — User management, Logs & monitoring, System settings | ❌ Not Started | User CRUD, system logs, config dashboard |

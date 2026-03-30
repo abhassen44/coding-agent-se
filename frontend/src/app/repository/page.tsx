@@ -138,12 +138,31 @@ export default function RepositoryPage() {
         if (!token) return;
         try {
             const response = await fetch(
-                `${API_BASE}/repo/${selectedRepo.id}/search?query=${encodeURIComponent(searchQuery)}`,
-                { headers: { Authorization: `Bearer ${token}` } }
+                `${API_BASE}/repo/${selectedRepo.id}/search`,
+                {
+                    method: 'POST',
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ query: searchQuery, top_k: 5 }),
+                }
             );
             if (response.ok) {
                 const data = await response.json();
-                setSearchResults(data.results || []);
+                const allChunks: ChunkResult[] = data.chunks || [];
+                // Deduplicate: keep only the highest-scored chunk per file
+                const seen = new Map<string, ChunkResult>();
+                for (const chunk of allChunks) {
+                    const key = chunk.file_path || String(chunk.file_id);
+                    const existing = seen.get(key);
+                    if (!existing || chunk.relevance_score > existing.relevance_score) {
+                        seen.set(key, chunk);
+                    }
+                }
+                setSearchResults(Array.from(seen.values()));
+            } else {
+                setError('Search failed');
             }
         } catch (err) {
             setError('Search failed');

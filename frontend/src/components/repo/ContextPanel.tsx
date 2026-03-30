@@ -38,7 +38,7 @@ function RelevanceBar({ score }: { score: number }) {
                 }}
             />
             <span className="relevance-label">{percentage}%</span>
-            <style jsx>{`
+            <style>{`
         .relevance-bar {
           position: relative;
           width: 60px;
@@ -83,7 +83,7 @@ function ChunkCard({ chunk, onClick }: { chunk: ChunkResult; onClick?: () => voi
             <pre className="chunk-content">
                 <code>{truncatedContent}</code>
             </pre>
-            <style jsx>{`
+            <style>{`
         .chunk-card {
           background: var(--bg-secondary, #1f2937);
           border: 1px solid var(--border-color, #374151);
@@ -181,7 +181,7 @@ export default function ContextPanel({
                 )}
             </div>
 
-            <style jsx>{`
+            <style>{`
         .context-panel {
           height: 100%;
           display: flex;
