@@ -57,3 +57,21 @@ backend/storage/
 beatcode/
 start/
 phase_4/
+
+/.agent 
+/.gemini
+/.gsd
+/adapters
+/docs
+/
+
+# Untracked project files
+/scripts
+/GSD-STYLE.md
+/model_capabilities.yaml
+/PROJECT_RULES.md
+
+# Agent files
+/.GSD-STYLE.md
+/.model_capabilities.yaml
+/.PROJECT_RULES.md
