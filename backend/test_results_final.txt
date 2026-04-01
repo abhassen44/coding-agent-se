@@ -1,0 +1,20 @@
+﻿============================= test session starts =============================
+platform win32 -- Python 3.11.9, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\Abhas\OneDrive\Desktop\coding\coding_Agent\coding-agent\backend
+configfile: pytest.ini
+plugins: anyio-4.12.1, langsmith-0.7.22, asyncio-1.3.0, cov-7.1.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 158 items
+
+test_cases\white_box\test_auth_service_internals.py .................    [ 10%]
+test_cases\white_box\test_execution_service_internals.py ............... [ 20%]
+........                                                                 [ 25%]
+test_cases\white_box\test_security_internals.py ........................ [ 40%]
+.                                                                        [ 41%]
+test_cases\white_box\test_workspace_service_internals.py ............... [ 50%]
+.......                                                                  [ 55%]
+test_cases\black_box\test_auth_api.py .........................          [ 70%]
+test_cases\black_box\test_execution_api.py ..................            [ 82%]
+test_cases\black_box\test_workspace_api.py ............................  [100%]
+
+============================ 158 passed in 38.28s =============================

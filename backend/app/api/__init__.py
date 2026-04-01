@@ -8,6 +8,7 @@ from app.api.execution import router as execution_router
 from app.api.workspace import router as workspace_router
 from app.api.terminal import router as terminal_router
 from app.api.agent import router as agent_router
+from app.api.preview import router as preview_router
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
@@ -18,3 +19,4 @@ api_router.include_router(execution_router)
 api_router.include_router(workspace_router)
 api_router.include_router(terminal_router)
 api_router.include_router(agent_router)
+api_router.include_router(preview_router)

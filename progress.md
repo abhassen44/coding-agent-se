@@ -16,13 +16,13 @@
 | **Phase 4B** | Web Code Editor — Monaco/VS Code in browser | ✅ Completed | Monaco editor, multi-tab editing, file tree, create/edit/save/delete |
 | **Phase 4C** | Terminal & Commands — Shell inside sandbox | ✅ Completed | WebSocket terminal via Docker exec, xterm.js UI, toggle panel |
 | **Phase 4D** | AI Agent in Sandbox — AI reads/writes/runs in workspace | ✅ Completed | Smart Qwen/Gemini routing, structured JSON actions, accept/reject flow, workspace chat panel | 
-| **Phase 4E** | Live Preview — See the app running | ❌ Not Started | Port forwarding, iframe preview, auto-reload, dev server management |
+| **Phase 4E** | Live Preview — See the app running | ✅ Completed | Host proxying, companion container, iframe preview, start/stop dev server |
 | **Phase 5** | Automation — Task definitions, Workflow execution, Scheduling | ❌ Not Started | Multi-step tasks, background execution, cron triggers |
 | **Phase 6** | Admin Panel — User management, Logs & monitoring, System settings | ❌ Not Started | User CRUD, system logs, config dashboard |
 
 ---
 
-## Current Position: 🎯 Phase 4A — Sandbox Workspace
+## Current Position: 🎯 Phase 5 — Automation
 
 ---
 
@@ -60,11 +60,11 @@
 - **Accept/reject/edit flow** — user reviews AI changes before applying
 - **Context-aware from RAG + live files**
 
-### Phase 4E — Live Preview
-- **Port forwarding** from sandbox container to host
-- **iframe preview** of the running app in the UI
-- **Auto-reload** on file changes
-- **Dev server management** — start/stop the app inside sandbox
+### Phase 4E — Live Preview ✅
+- **Port proxying** from sandbox container to host via Alpine companion
+- **iframe preview** of the running app in the Workspace UI
+- **Redis state management** for preview lifecycle
+- **Dev server management** — start/stop the app inside sandbox (e.g. npm start)
 
 ---
 
