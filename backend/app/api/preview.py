@@ -64,6 +64,9 @@ async def start_preview(
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error starting preview for workspace {workspace_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Preview start failed: {str(e)}")
 
 
 @router.post("/{workspace_id}/stop")

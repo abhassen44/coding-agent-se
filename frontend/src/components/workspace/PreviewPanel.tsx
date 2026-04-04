@@ -71,15 +71,28 @@ export function PreviewPanel({ workspaceId, isVisible }: PreviewPanelProps) {
                      stopPolling();
                 }
             } else {
-                 const err = await res.json();
-                 if(res.status === 400 && err.detail?.includes("not running")){
-                     setStatus("error");
-                     setErrorMsg("Workspace container is not running");
-                     stopPolling();
-                 }
+                try {
+                    const err = await res.json();
+                    if(res.status === 400 && err.detail?.includes("not running")){
+                        setStatus("error");
+                        setErrorMsg("Workspace container is not running");
+                        stopPolling();
+                    } else {
+                        setStatus("error");
+                        setErrorMsg(err.detail || `Server error (${res.status})`);
+                        stopPolling();
+                    }
+                } catch {
+                    setStatus("error");
+                    setErrorMsg(`Server error (${res.status})`);
+                    stopPolling();
+                }
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Failed to check preview status', error);
+            setStatus('error');
+            setErrorMsg(error.message || 'Failed to check preview status');
+            stopPolling();
         }
     };
 

@@ -74,14 +74,25 @@ class PreviewService:
             raise RuntimeError("No free ports available in range 34500-34599")
 
         # Step 1: Start the dev server inside the workspace container
-        await asyncio.get_event_loop().run_in_executor(
+        workdir = await asyncio.get_event_loop().run_in_executor(
             None,
             self._start_dev_server,
             workspace.container_id,
             command,
         )
 
-        # Step 2: Start companion container for port forwarding
+        # Step 1b: Brief startup pause then check dev server log for immediate failures
+        await asyncio.sleep(3)
+        startup_log = await asyncio.get_event_loop().run_in_executor(
+            None, self._read_devserver_log, workspace.container_id
+        )
+        if startup_log:
+            logger.info(f"Dev server startup log:\n{startup_log[:500]}")
+            # Detect common fatal errors
+            fatal_keywords = ['enoent', 'cannot find', 'error:', 'not found', 'failed to compile', 'exit 1']
+            first_lines = startup_log.lower()[:300]
+            if any(k in first_lines for k in fatal_keywords) and len(startup_log.strip()) < 200:
+                raise RuntimeError(f"Dev server failed to start: {startup_log[:200].strip()}")
         companion_id = await asyncio.get_event_loop().run_in_executor(
             None,
             self._start_companion,
@@ -214,26 +225,85 @@ class PreviewService:
 
     # ── Docker Helpers ─────────────────────────────────────────────────────────
 
-    def _start_dev_server(self, container_id: str, command: str) -> None:
-        """Run the dev server command inside the workspace container (detached)."""
+    def _find_workdir(self, container_id: str, command: str) -> str:
+        """Auto-detect the correct working directory for the command.
+        
+        Searches /workspace for the most relevant project root:
+        - npm/node commands → find package.json
+        - python/uvicorn commands → find requirements.txt or main.py  
+        - defaults to /workspace
+        """
         try:
             container = self.docker_client.containers.get(container_id)
-            # Kill any existing dev servers on the workspace first (best-effort)
+            cmd_lower = command.lower()
+            
+            if any(k in cmd_lower for k in ['npm', 'node', 'yarn', 'pnpm', 'next', 'vite']):
+                # Find package.json — prefer shallowest one, but skip root if subdir has one
+                result = container.exec_run(
+                    "bash -c 'find /workspace -name package.json -not -path \"*/node_modules/*\" | sort'",
+                )
+                paths = result.output.decode(errors='ignore').strip().splitlines()
+                if paths:
+                    # Prefer /workspace/package.json, else use first found subdir
+                    for p in paths:
+                        return p.replace('/package.json', '') or '/workspace'
+            
+            elif any(k in cmd_lower for k in ['python', 'uvicorn', 'flask', 'fastapi', 'django']):
+                # Find requirements.txt or main.py
+                result = container.exec_run(
+                    "bash -c 'find /workspace -name requirements.txt -not -path \"*/.git/*\" | sort | head -1'",
+                )
+                path = result.output.decode(errors='ignore').strip()
+                if path:
+                    return path.replace('/requirements.txt', '') or '/workspace'
+        except Exception as e:
+            logger.warning(f"Workdir detection failed: {e}")
+        
+        return '/workspace'
+
+    def _start_dev_server(self, container_id: str, command: str) -> str:
+        """Run the dev server command inside the workspace container (detached).
+        
+        Returns the working directory used so it can be stored in Redis.
+        """
+        try:
+            container = self.docker_client.containers.get(container_id)
+            
+            # Auto-detect correct working directory
+            workdir = self._find_workdir(container_id, command)
+            logger.info(f"Auto-detected workdir: {workdir} for command: {command}")
+            
+            # Kill any existing dev servers first (best-effort)
             container.exec_run(
-                "bash -c 'pkill -f \"npm\\|node\\|python.*http.server\\|uvicorn\" 2>/dev/null || true'",
-                workdir="/workspace",
+                "bash -c 'pkill -f \"npm run dev\\|next dev\\|vite\\|python.*http.server\\|uvicorn\" 2>/dev/null || true'",
+                workdir=workdir,
             )
+            import time
+            time.sleep(0.5)  # Brief pause to let processes die
+            
             # Start the dev server as a detached process
+            # Write stdout/stderr to a log file for debugging
+            log_path = '/tmp/devserver.log'
             container.exec_run(
-                f"bash -c 'cd /workspace && {command} &'",
-                workdir="/workspace",
+                f"bash -c 'cd {workdir} && {command} > {log_path} 2>&1 &'",
+                workdir=workdir,
                 detach=True,
             )
-            logger.info(f"Started dev server in container {container_id[:12]}: {command}")
+            logger.info(f"Started dev server in container {container_id[:12]}: {command} (workdir={workdir})")
+            return workdir
         except NotFound:
             raise ValueError("Workspace container not found")
         except APIError as e:
             raise RuntimeError(f"Failed to start dev server: {e}")
+
+    def _read_devserver_log(self, container_id: str) -> str:
+        """Read the dev server startup log from the container."""
+        try:
+            container = self.docker_client.containers.get(container_id)
+            result = container.exec_run("bash -c 'cat /tmp/devserver.log 2>/dev/null || true'")
+            return result.output.decode(errors='ignore').strip()
+        except Exception:
+            return ""
 
     def _start_companion(
         self, workspace_container_id: str, workspace_name: str,
@@ -335,7 +405,7 @@ class PreviewService:
                     resp = await client.get(f"http://localhost:{port}/")
                     if resp.status_code < 500:
                         return True
-            except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout):
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, httpx.RemoteProtocolError, httpx.ReadError, ConnectionError, OSError):
                 pass
             await asyncio.sleep(HEALTH_PROBE_INTERVAL)
         logger.warning(f"Port {port} not reachable after {HEALTH_PROBE_TIMEOUT}s")
