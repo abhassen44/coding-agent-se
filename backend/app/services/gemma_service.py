@@ -1,14 +1,14 @@
-"""Service for interacting with Qwen 3.5 via Ollama."""
+"""Service for interacting with Gemma 4 via Ollama."""
 import httpx
 from typing import AsyncGenerator, Optional
 
 
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "qwen3.5:9b"
+OLLAMA_MODEL = "gemma4:latest"
 
 
-class QwenService:
-    """Service for interacting with Qwen 3.5 via Ollama API."""
+class GemmaService:
+    """Service for interacting with Gemma 4 via Ollama API."""
 
     SYSTEM_PROMPT = """You are an expert coding assistant called ICA (Intelligent Coding Agent).
 You help developers with:
@@ -30,15 +30,13 @@ When explaining code:
 
 Support languages: Python, JavaScript, TypeScript, C++, Java, and more.
 
-Format responses using Markdown with proper code blocks.
+Format responses using Markdown with proper code blocks."""
 
-IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning. Respond directly. Use /no_think mode."""
-
-    def __init__(self, model: Optional[str] = None):
+    def __init__(self):
         self.base_url = OLLAMA_BASE_URL
-        self.model = model or OLLAMA_MODEL
+        self.model = OLLAMA_MODEL
         self._available = None
-        print(f"Qwen service initialized (model: {self.model})")
+        print(f"Gemma service initialized (model: {self.model})")
 
     async def _check_available(self) -> bool:
         """Check if Ollama is running and model is available."""
@@ -49,7 +47,7 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
                 resp = await client.get(f"{self.base_url}/api/tags")
                 if resp.status_code == 200:
                     models = [m["name"] for m in resp.json().get("models", [])]
-                    self._available = any(self.model in m for m in models)
+                    self._available = any("gemma4" in m for m in models)
                     return self._available
         except Exception as e:
             print(f"⚠️ Ollama connection check failed: {e}")
@@ -92,7 +90,7 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
         chat_history: Optional[list[dict]] = None,
         context: Optional[str] = None,
     ) -> str:
-        """Generate a response from Qwen via Ollama."""
+        """Generate a response from Gemma4 via Ollama."""
         if not await self._check_available():
             return (
                 "⚠️ **Ollama not available**\n\n"
@@ -124,7 +122,7 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
         except httpx.ConnectError:
             return f"⚠️ **Cannot connect to Ollama** at {self.base_url}\n\nMake sure Ollama is running: `ollama serve`"
         except httpx.TimeoutException:
-            return "⚠️ **Request timed out** — Qwen is taking too long to respond. The model may still be loading."
+            return "⚠️ **Request timed out** — Gemma4 is taking too long to respond. The model may still be loading."
         except Exception as e:
             return f"⚠️ **Ollama error:** {type(e).__name__}: {str(e)}"
 
@@ -134,7 +132,7 @@ IMPORTANT: Do NOT wrap your response in <think> tags or show internal reasoning.
         chat_history: Optional[list[dict]] = None,
         context: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
-        """Stream a response from Qwen via Ollama."""
+        """Stream a response from Gemma4 via Ollama."""
         if not await self._check_available():
             yield (
                 f"⚠️ **Ollama not available**\n\n"
@@ -241,22 +239,13 @@ Provide:
         return await self.generate_response(prompt)
 
 
-# Singleton instances
-_qwen_service: Optional[QwenService] = None
-_qwen_cloud_service: Optional[QwenService] = None
+# Singleton instance
+_gemma_service: Optional[GemmaService] = None
 
 
-def get_qwen_service() -> QwenService:
-    """Get or create the Qwen service instance."""
-    global _qwen_service
-    if _qwen_service is None:
-        _qwen_service = QwenService()
-    return _qwen_service
-
-
-def get_qwen_cloud_service() -> QwenService:
-    """Get or create the Qwen 3.5 397B Cloud service instance."""
-    global _qwen_cloud_service
-    if _qwen_cloud_service is None:
-        _qwen_cloud_service = QwenService(model="qwen3.5:397b-cloud")
-    return _qwen_cloud_service
+def get_gemma_service() -> GemmaService:
+    """Get or create the Gemma service instance."""
+    global _gemma_service
+    if _gemma_service is None:
+        _gemma_service = GemmaService()
+    return _gemma_service

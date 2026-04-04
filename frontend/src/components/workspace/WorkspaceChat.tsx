@@ -50,7 +50,9 @@ interface WorkspaceChatProps {
 const PROVIDER_OPTIONS: Array<{ value: AgentProvider; label: string }> = [
     { value: 'auto', label: 'Auto' },
     { value: 'gemini', label: 'Gemini' },
-    { value: 'qwen', label: 'Qwen' },
+    { value: 'qwen', label: 'Qwen 3.5 (Local)' },
+    { value: 'qwen-cloud', label: 'Qwen 397B (Cloud)' },
+    { value: 'gemma4', label: 'Gemma 4 (Local)' },
     { value: 'hf-qwen-7b', label: 'HF Qwen 7B' },
     { value: 'hf-qwen-35b', label: 'HF Qwen 35B' },
     { value: 'hf-llama-8b', label: 'HF Llama 8B' },

@@ -322,6 +322,32 @@ class AgentService:
                 logger.error(f"HuggingFace {display_name} failed: {e}")
                 raise RuntimeError(f"HuggingFace {display_name} unavailable: {e}")
         
+        # ── Gemma4 (Ollama — local) ──
+        if provider == "gemma4":
+            try:
+                from langchain_ollama import ChatOllama
+                logger.info(f"Agent using Gemma4 (context ~{context_size} tokens)")
+                return ChatOllama(
+                    model="gemma4:latest",
+                    temperature=0,
+                    base_url="http://localhost:11434",
+                ), "gemma4"
+            except Exception as e:
+                logger.warning(f"Gemma4 unavailable: {e}, falling back to Gemini")
+
+        # ── Qwen 3.5 397B (Ollama — cloud) ──
+        if provider == "qwen-cloud":
+            try:
+                from langchain_ollama import ChatOllama
+                logger.info(f"Agent using Qwen 3.5 397B Cloud (context ~{context_size} tokens)")
+                return ChatOllama(
+                    model="qwen3.5:397b-cloud",
+                    temperature=0,
+                    base_url="http://localhost:11434",
+                ), "qwen-cloud"
+            except Exception as e:
+                logger.warning(f"Qwen Cloud unavailable: {e}, falling back to Gemini")
+
         # ── Qwen (Ollama — local) ──
         use_qwen = (
             provider == "qwen" or

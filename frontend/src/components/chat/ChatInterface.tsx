@@ -41,7 +41,7 @@ export default function ChatInterface() {
     const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
     const [uploadedFiles, setUploadedFiles] = useState<{ name: string, status: 'uploading' | 'success' | 'error' }[]>([]);
     const [showRepoDropdown, setShowRepoDropdown] = useState(false);
-    const [provider, setProvider] = useState<"gemini" | "qwen">("gemini");
+    const [provider, setProvider] = useState<"gemini" | "qwen" | "qwen-cloud" | "gemma4">("gemini");
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -315,31 +315,31 @@ export default function ChatInterface() {
                         </span>
                     )}
 
-                    {/* AI Provider Toggle */}
-                    <button
-                        onClick={() => setProvider(prev => prev === "gemini" ? "qwen" : "gemini")}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 border ${provider === "gemini"
-                                ? "bg-[#2EFF7B]/10 text-[#2EFF7B] border-[#2EFF7B]/30 hover:bg-[#2EFF7B]/20"
-                                : "bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20"
+                    {/* AI Provider Dropdown */}
+                    <div className="relative">
+                        <select
+                            value={provider}
+                            onChange={(e) => setProvider(e.target.value as "gemini" | "qwen" | "qwen-cloud" | "gemma4")}
+                            className={`appearance-none cursor-pointer px-3 py-1.5 pr-7 rounded-lg text-xs font-medium transition-all duration-200 border focus:outline-none ${
+                                provider === "gemini"
+                                    ? "bg-[#2EFF7B]/10 text-[#2EFF7B] border-[#2EFF7B]/30 hover:bg-[#2EFF7B]/20"
+                                    : provider === "gemma4"
+                                    ? "bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20"
+                                    : provider === "qwen-cloud"
+                                    ? "bg-orange-500/10 text-orange-400 border-orange-500/30 hover:bg-orange-500/20"
+                                    : "bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20"
                             }`}
-                    >
-                        {provider === "gemini" ? (
-                            <>
-                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
-                                    <path d="M12 2L2 19.5h20L12 2zm0 4l6.5 11.5h-13L12 6z" />
-                                </svg>
-                                Gemini
-                            </>
-                        ) : (
-                            <>
-                                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <rect x="4" y="4" width="16" height="16" rx="2" />
-                                    <path d="M9 9h6M9 12h6M9 15h3" />
-                                </svg>
-                                Qwen 3.5 (Local)
-                            </>
-                        )}
-                    </button>
+                            aria-label="AI model"
+                        >
+                            <option value="gemini">✦ Gemini</option>
+                            <option value="gemma4">◆ Gemma 4 (Local)</option>
+                            <option value="qwen">■ Qwen 3.5 (Local)</option>
+                            <option value="qwen-cloud">☁ Qwen 397B (Cloud)</option>
+                        </select>
+                        <svg className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-[#5A7268]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </div>
                 </div>
             </div>
 

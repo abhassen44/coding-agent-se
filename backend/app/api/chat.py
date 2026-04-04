@@ -13,7 +13,8 @@ from app.schemas.chat import (
     CodeResponse,
 )
 from app.services.gemini_service import get_gemini_service
-from app.services.qwen_service import get_qwen_service
+from app.services.qwen_service import get_qwen_service, get_qwen_cloud_service
+from app.services.gemma_service import get_gemma_service
 from app.services.rag_service import RAGService
 from app.core.database import get_db
 
@@ -42,6 +43,10 @@ def get_ai_service(provider: str = "gemini"):
     """Get the appropriate AI service based on provider."""
     if provider == "qwen":
         return get_qwen_service()
+    if provider == "qwen-cloud":
+        return get_qwen_cloud_service()
+    if provider == "gemma4":
+        return get_gemma_service()
     return get_gemini_service()
 
 
