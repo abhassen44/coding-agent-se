@@ -660,8 +660,25 @@ class AgentService:
         prompt: str,
         file_paths: Optional[List[str]] = None,
         provider: str = "auto",
+        conversation_id: Optional[int] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """Run the agent with real-time token streaming via manual loop."""
+
+        # ── Memory: load or create conversation ──
+        from app.services.conversation_service import ConversationService
+        from app.services.context_manager import ContextManager
+        from app.services.redis_memory import get_redis_memory
+
+        conv_service = ConversationService(self.db)
+        redis_mem = get_redis_memory()
+        ctx_mgr = ContextManager(redis_mem, conv_service)
+
+        if conversation_id:
+            conversation = await conv_service.get(conversation_id)
+            if not conversation:
+                conversation = await conv_service.get_or_create_for_workspace(user_id, workspace_id)
+        else:
+            conversation = await conv_service.get_or_create_for_workspace(user_id, workspace_id)
 
         # Create workspace-bound tools (8 tools)
         tools = create_workspace_tools(self.workspace_service, workspace_id, user_id)
@@ -680,9 +697,15 @@ class AgentService:
 
         yield {"type": "status", "status": "thinking", "model": model_name}
 
-        # State
+        # ── Memory: load prior history and inject ──
+        history_msgs = await ctx_mgr.get_context_messages(conversation.id)
+        lc_history = ctx_mgr.to_langchain_messages(history_msgs)
+        logger.info(f"Agent memory: injecting {len(lc_history)} prior messages for conv {conversation.id}")
+
+        # State — WITH MEMORY
         messages = [
             SystemMessage(content=AGENT_SYSTEM_PROMPT),
+            *lc_history,                    # ← INJECTED MEMORY
             HumanMessage(content=prompt),
         ]
         iteration_count = 0
@@ -693,6 +716,7 @@ class AgentService:
         tool_calls_made: set[tuple] = set()
         EXPLORATION_TOOLS = {"list_files", "read_file", "read_file_lines", "search_code", "find_files"}
         collected_actions: List[AgentAction] = []
+        tool_calls_collected: list[dict] = []  # For memory persistence
         inside_think = False
         # ── FIX 2: Track last content to detect infinite repeat loops ──
         last_full_content = ""
@@ -792,6 +816,13 @@ class AgentService:
                             "name": tool_name,
                             "output": output_str,
                         }
+
+                        # Collect for memory persistence
+                        tool_calls_collected.append({
+                            "name": tool_name,
+                            "args": tool_args,
+                            "output": output_str,
+                        })
 
                         # Add tool result to conversation
                         messages.append(ToolMessage(
@@ -910,12 +941,47 @@ class AgentService:
                 except Exception as e:
                     logger.warning(f"Summary streaming call failed: {e}")
 
+            # ── Memory: persist messages to Postgres + Redis ──
+            try:
+                # Save user prompt
+                await conv_service.add_message(conversation.id, "user", prompt)
+                await redis_mem.push_message(conversation.id, "user", prompt)
+
+                # Save agent final response
+                final_text = last_full_content or "Agent completed."
+                await conv_service.add_message(
+                    conversation.id, "assistant", final_text,
+                    metadata={"model_used": model_name}
+                )
+                await redis_mem.push_message(conversation.id, "assistant", final_text)
+
+                # Save tool summaries (condensed)
+                for tc in tool_calls_collected:
+                    summary = ContextManager.summarize_tool_output(
+                        tc["name"], tc.get("args", {}), tc.get("output", "")
+                    )
+                    await conv_service.add_message(
+                        conversation.id, "tool_summary", summary,
+                        metadata={"full_output": tc.get("output", "")[:2000], "tool_name": tc["name"]}
+                    )
+                    await redis_mem.push_message(conversation.id, "tool_summary", summary)
+
+                # Update conversation title from first user message
+                msg_count = await conv_service.get_message_count(conversation.id)
+                if msg_count <= 3:  # First exchange
+                    title = prompt[:40] + ("..." if len(prompt) > 40 else "")
+                    await conv_service.update_title(conversation.id, title)
+
+            except Exception as e:
+                logger.warning(f"Failed to persist conversation memory: {e}")
+
             # Stream complete
             yield {
                 "type": "done",
                 "model_used": model_name,
                 "context_tokens_approx": context_size,
                 "actions": [a.model_dump() for a in collected_actions],
+                "conversation_id": conversation.id,
             }
 
         except Exception as e:

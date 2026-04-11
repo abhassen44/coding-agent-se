@@ -7,9 +7,13 @@ class AgentRequest(BaseModel):
     """Request body for POST /agent/act."""
     workspace_id: int
     prompt: str = Field(..., min_length=1, max_length=4000)
+    conversation_id: Optional[int] = Field(
+        default=None,
+        description="Resume an existing conversation. If None, auto-creates one for the workspace.",
+    )
     file_paths: Optional[List[str]] = Field(
         default=None,
-        description="Specific file paths to include as context. If None, agent auto-discovers key files."
+        description="Specific file paths to include as context. If None, agent auto-discovers key files.",
     )
     provider: Optional[Literal[
         "auto", "gemini", "qwen", "qwen-cloud", "gemma4",
@@ -18,7 +22,7 @@ class AgentRequest(BaseModel):
         "gpt-oss-cloud", "kimi-cloud", "minimax-cloud"
     ]] = Field(
         default="auto",
-        description="Model selection: auto, gemini, qwen, qwen-cloud, gemma4, or hf-* HuggingFace models."
+        description="Model selection: auto, gemini, qwen, qwen-cloud, gemma4, or hf-* HuggingFace models.",
     )
 
 

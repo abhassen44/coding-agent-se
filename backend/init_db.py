@@ -15,6 +15,7 @@ async def init_db():
     from app.models.user import User
     from app.models.file import Repository, File, FileChunk
     from app.models.activity_log import ActivityLog
+    from app.models.conversation import Conversation, ChatMessageRecord
     
     settings = get_settings()
     engine = create_async_engine(settings.database_url, echo=True)

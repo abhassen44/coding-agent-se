@@ -1,6 +1,6 @@
 # Intelligent Coding Agent (ICA) — Progress Tracker
 
-> Last updated: 2026-03-18
+> Last updated: 2026-04-11
 
 ---
 
@@ -15,18 +15,20 @@
 | **Phase 4A** | Sandbox Workspace — Container per project | ✅ Completed | Workspace model, WorkspaceService with Docker lifecycle + file API, 11 REST endpoints, Open Workspace button |
 | **Phase 4B** | Web Code Editor — Monaco/VS Code in browser | ✅ Completed | Monaco editor, multi-tab editing, file tree, create/edit/save/delete |
 | **Phase 4C** | Terminal & Commands — Shell inside sandbox | ✅ Completed | WebSocket terminal via Docker exec, xterm.js UI, toggle panel |
-| **Phase 4D** | AI Agent in Sandbox — AI reads/writes/runs in workspace | ✅ Completed | Smart Qwen/Gemini routing, structured JSON actions, accept/reject flow, workspace chat panel | 
-| **Phase 4E** | Live Preview — See the app running | ✅ Completed | Host proxying, companion container, iframe preview, start/stop dev server |
-| **Phase 5** | Admin Panel — User management, Logs & monitoring, System settings | ❌ Not Started | User CRUD, system logs, config dashboard |
+| **Phase 4D** | AI Agent in Sandbox — AI reads/writes/runs in workspace | ✅ Completed | Smart Qwen/Gemini routing, structured JSON actions, accept/reject flow, workspace chat panel |
+| **Phase 5** | Admin Panel — User management, Logs & monitoring, System settings | ✅ Completed | User CRUD, activity logs, admin dashboard, JWT role guard |
+| **Phase 6** | Agent Memory — Persistent context across sessions | 🔶 In Progress | Redis session buffer, Postgres conversations, Qdrant episodic memory |
 
 ## Additional Features
 | Phase | Name | Status | Details |
-|-------|------|--------|---------|
-| **Automation** | Task definitions, Workflow execution, Scheduling | ❌ Not Started | Multi-step tasks, background execution, cron triggers |
+|-------|------|---------|---------|
+| **Phase 7** | Automation — Task definitions, Workflow execution, Scheduling | ❌ Not Started | Multi-step tasks, background execution, cron triggers |
+| **Phase 4E** | Live Preview — See the app running | ❌ Not Started | Host proxying, companion container, iframe preview, start/stop dev server |
+
 
 ---
 
-## Current Position: 🎯 Phase 5 — Admin Panel
+## Current Position: 🎯 Phase 6 — Agent Memory
 
 ---
 
@@ -69,6 +71,53 @@
 - **iframe preview** of the running app in the Workspace UI
 - **Redis state management** for preview lifecycle
 - **Dev server management** — start/stop the app inside sandbox (e.g. npm start)
+
+### Phase 5 — Admin Panel ✅
+- **Admin bootstrap** — `ADMIN_EMAIL` env var auto-promotes on register/login
+- **Activity logging** — `ActivityLog` model, `LogService` for USER_LOGIN, REPO_CREATED, AGENT_RUN, WORKSPACE_CREATED events
+- **Admin service** — User list, ban/unban, role change, cascade delete, system stats (Docker containers)
+- **Admin API** — 6 protected routes under `/api/v1/admin/*` guarded by `CurrentAdminUser`
+- **Admin UI** — `/admin/users`, `/admin/stats`, `/admin/logs` with sidebar layout + JWT role guard
+- **Dashboard integration** — Admin Panel button visible only to admin users
+
+---
+
+## Phase 6 — Agent Memory (3-Tier Architecture)
+
+> Using existing infrastructure: Redis + PostgreSQL + Qdrant. Zero new dependencies.
+
+### Phase 6.1 — Multi-Modal Context Extraction ✅
+- **Inline Text Extraction** — Extracted contents from text/code files directly without DB storage bloat.
+- **Rich Document Support** — Integrated `pypdf` (PDFs) and `python-docx` (Word Docs) for rich extraction.
+- **Ollama Vision Integration** — Migrated image parsing to local `Ollama` using the `gemma4:31b-cloud` multimodal model instead of Gemini.
+- **Frontend Context Injection** — Dynamically attaches extracted contents as a preamble into the active `ChatRequest`.
+
+### Tier 1 — Hot Memory (Redis Session Buffer) ✅
+- **Sliding window** of last 10-15 messages per active session
+- **TTL: 2 hours** — auto-expires idle sessions
+- **Use:** Injected into every LLM call for immediate conversational context
+- **Covers:** Both RAG chat (`/chat`) and Workspace agent (`/workspace`)
+
+### Tier 2 — Warm Memory (PostgreSQL Conversations) ✅
+- **`conversations` table** — `id`, `user_id`, `workspace_id` (nullable), `title`, `created_at`
+- **`chat_messages` table** — `id`, `conversation_id`, `role`, `content`, `metadata` (JSONB)
+- **ConversationService** — CRUD for conversations + messages, history API loading.
+- **JWT Auth Injection** — Accurate user tracking by extracting `user_id` from the Auth token header. 
+- **Dynamic Sidebar UI** — "New Chat" idempotency, live event-driven `Recent Chats` list.
+- **Chat Management** — Inline Rename mapping (`PATCH`) and conversation Deletion (`DELETE`).
+- **One conversation per workspace** — agent remembers everything it did in that workspace
+
+### Tier 3 — Cold Memory (Qdrant Episodic Memory)
+- **Embed resolved conversations** as searchable episodes in Qdrant
+- **Semantic retrieval** — "I solved something similar last week" recall
+- **Auto-embed** successful agent sessions (file edits that weren't reverted)
+- **Cross-workspace knowledge** — solutions from Workspace A inform Workspace B
+
+### Advanced — Self-Built Memory Engine (Memori-style)
+- **Custom implementation** — no third-party library, built on top of Tier 2 Postgres
+- **Automatic context injection** — intercept LLM calls, inject relevant historical facts
+- **User preference learning** — store patterns like "always uses TypeScript", "prefers functional style"
+- **Agent personality persistence** — coding style, naming conventions, project-specific knowledge
 
 ---
 

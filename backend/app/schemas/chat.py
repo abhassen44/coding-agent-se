@@ -13,6 +13,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     """Schema for chat request."""
     message: str
+    conversation_id: Optional[int] = None  # Resume existing conversation
     session_id: Optional[str] = None
     history: Optional[List[ChatMessage]] = None
     repository_id: Optional[int] = None  # For RAG context injection
@@ -24,6 +25,7 @@ class ChatResponse(BaseModel):
     """Schema for chat response."""
     message: str
     session_id: str
+    conversation_id: Optional[int] = None  # Always returned for persistence
     context_used: bool = False
 
 

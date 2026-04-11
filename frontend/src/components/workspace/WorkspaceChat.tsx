@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { AgentAction, AgentProvider, AgentStreamEvent, apiClient } from '@/lib/api';
+import { AgentAction, AgentProvider, AgentStreamEvent, apiClient, ConversationMessage } from '@/lib/api';
 import { DiffViewer } from './DiffViewer';
 import {
     Bot,
@@ -79,6 +79,8 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
     const [streamingContent, setStreamingContent] = useState('');
     const [streamingTools, setStreamingTools] = useState<ToolCallCard[]>([]);
     const [streamingModel, setStreamingModel] = useState('');
+    const [conversationId, setConversationId] = useState<number | null>(null);
+    const [historyLoaded, setHistoryLoaded] = useState(false);
 
     const [planMode, setPlanMode] = useState(false);
     const [provider, setProvider] = useState<AgentProvider>('qwen-cloud');
@@ -92,6 +94,43 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
     onFileChangedRef.current = onFileChanged;
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+
+    // ── Phase 6: Load conversation history on mount ──
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await apiClient.listConversations(workspaceId);
+                if (cancelled) return;
+                if (res.conversations.length > 0) {
+                    const conv = res.conversations[0];
+                    setConversationId(conv.id);
+                    const msgRes = await apiClient.getConversationMessages(conv.id, 50);
+                    if (cancelled) return;
+                    const loaded: ChatMessage[] = msgRes.messages
+                        .filter((m: ConversationMessage) => m.role !== 'tool_summary')
+                        .map((m: ConversationMessage) => ({
+                            role: m.role === 'user' ? 'user' as const : 'agent' as const,
+                            content: m.content,
+                            toolCalls: m.metadata_json?.tool_name ? [{
+                                name: m.metadata_json.tool_name as string,
+                                args: {},
+                                status: 'done' as const,
+                                output: (m.metadata_json.full_output as string) || '',
+                            }] : undefined,
+                        }));
+                    if (loaded.length > 0) {
+                        setMessages(loaded);
+                    }
+                }
+            } catch (err) {
+                console.warn('Failed to load conversation history:', err);
+            } finally {
+                if (!cancelled) setHistoryLoaded(true);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [workspaceId]);
 
     const contextFilePaths = (() => {
         const paths = [activeFilePath, ...openFilePaths].filter(
@@ -154,6 +193,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
             {
                 workspace_id: workspaceId,
                 prompt,
+                conversation_id: conversationId ?? undefined,
                 file_paths: contextFilePaths,
                 provider,
             },
@@ -213,6 +253,11 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                         setIsStreaming(false);
                         isStreamingRef.current = false;
                         abortControllerRef.current = null;
+
+                        // Phase 6: capture conversation_id from backend
+                        if (event.conversation_id) {
+                            setConversationId(event.conversation_id);
+                        }
 
                         // Re-fetch files that were edited/created
                         if (event.actions && event.actions.length > 0) {
@@ -286,7 +331,19 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
         );
 
         abortControllerRef.current = controller;
-    }, [input, isStreaming, workspaceId, contextFilePaths, provider]);
+    }, [input, isStreaming, workspaceId, contextFilePaths, provider, conversationId]);
+
+    const handleClearHistory = useCallback(async () => {
+        if (!conversationId) return;
+        if (!confirm('Clear all chat history for this workspace?')) return;
+        try {
+            await apiClient.deleteConversation(conversationId);
+            setMessages([]);
+            setConversationId(null);
+        } catch (err) {
+            console.error('Failed to clear history:', err);
+        }
+    }, [conversationId]);
 
 
     return (
@@ -320,6 +377,17 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                         </option>
                     ))}
                 </select>
+
+                {/* Clear History button */}
+                {conversationId && (
+                    <button
+                        onClick={handleClearHistory}
+                        className="text-[10px] text-[#5A7268] hover:text-red-400 transition-colors px-1.5 py-1 rounded hover:bg-red-400/10"
+                        title="Clear chat history"
+                    >
+                        <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                )}
             </div>
 
             {/* Context files */}

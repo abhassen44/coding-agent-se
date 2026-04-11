@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import MessageBubble from "./MessageBubble";
-import { apiClient, ChatMessage as ApiChatMessage } from "@/lib/api";
+import { apiClient, ChatMessage as ApiChatMessage, ConversationMessage } from "@/lib/api";
 
 interface Message {
     id: string;
@@ -17,6 +17,16 @@ interface Repository {
     name: string;
     description?: string;
     file_count: number;
+}
+
+interface AttachedFile {
+    name: string;
+    fileType: string;
+    text: string;
+    charCount: number;
+    truncated: boolean;
+    status: "extracting" | "ready" | "error";
+    error?: string;
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
@@ -37,10 +47,11 @@ export default function ChatInterface() {
     const isLoadingRef = useRef(false);
     const [streamingContent, setStreamingContent] = useState("");
     const [sessionId, setSessionId] = useState<string | null>(null);
+    const [conversationId, setConversationId] = useState<number | null>(null);
+    const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
     const useStreaming = false;
     const [repositories, setRepositories] = useState<Repository[]>([]);
     const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
-    const [uploadedFiles, setUploadedFiles] = useState<{ name: string, status: 'uploading' | 'success' | 'error' }[]>([]);
     const [showRepoDropdown, setShowRepoDropdown] = useState(false);
     const [planMode, setPlanMode] = useState(false);
     const [provider, setProvider] = useState<"gemini" | "qwen" | "qwen-cloud" | "gemma4" | "gpt-oss-cloud" | "kimi-cloud" | "minimax-cloud">("qwen-cloud");
@@ -63,18 +74,62 @@ export default function ChatInterface() {
         try {
             const raw = localStorage.getItem("recent_chats");
             const existing: { id: string; title: string; timestamp: number }[] = raw ? JSON.parse(raw) : [];
-            // Remove any previous entry for this session
             const filtered = existing.filter((c) => c.id !== id);
-            // Add to front
             filtered.unshift({ id, title, timestamp: Date.now() });
             localStorage.setItem("recent_chats", JSON.stringify(filtered.slice(0, 20)));
-            // Fire a storage event so Sidebar picks it up in the same tab
             window.dispatchEvent(new StorageEvent("storage", { key: "recent_chats" }));
         } catch {
             // ignore
         }
     };
 
+    // ── Session management: load history or reset for new chat ──
+    useEffect(() => {
+        const newParam = searchParams.get("new");
+        const sessionParam = searchParams.get("session");
+
+        // "New Chat" clicked — always flush all state
+        if (newParam) {
+            setMessages(INITIAL_MESSAGES);
+            setSessionId(null);
+            setConversationId(null);
+            setAttachedFiles([]);
+            setStreamingContent("");
+            setInput("");
+            return;
+        }
+
+        // Load existing conversation
+        if (!sessionParam) return;
+        const convId = parseInt(sessionParam, 10);
+        if (isNaN(convId)) return;
+
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await apiClient.getConversationMessages(convId, 50);
+                if (cancelled) return;
+                const loaded: Message[] = res.messages
+                    .filter((m: ConversationMessage) => m.role !== "tool_summary")
+                    .map((m: ConversationMessage) => ({
+                        id: String(m.id),
+                        role: (m.role === "user" ? "user" : "assistant") as "user" | "assistant",
+                        content: m.content,
+                        timestamp: new Date(m.created_at),
+                    }));
+                if (loaded.length > 0) {
+                    setMessages(loaded);
+                    setConversationId(convId);
+                }
+            } catch (err) {
+                console.warn("Failed to load conversation history:", err);
+            }
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams]);
+
+    // Fetch user repositories
     useEffect(() => {
         const fetchRepos = async () => {
             const token = getToken();
@@ -106,12 +161,10 @@ export default function ChatInterface() {
     useEffect(() => {
         const q = searchParams.get("q");
         if (!q) return;
-        // Remove the param from URL without re-render
         router.replace("/chat", { scroll: false });
-        // Set and submit
         setInput(q);
         const timeoutId = setTimeout(() => {
-            if (isLoadingRef.current) return; // Guard against Strict Mode double-fire
+            if (isLoadingRef.current) return;
             const userMessage: Message = {
                 id: Date.now().toString(),
                 role: "user",
@@ -137,53 +190,53 @@ export default function ChatInterface() {
                     const errMsg: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: `⚠️ Error: ${err?.message || "Unknown error"}`, timestamp: new Date() };
                     setMessages(prev => [...prev, errMsg]);
                 })
-                .finally(() => { 
-                    setIsLoading(false); 
+                .finally(() => {
+                    setIsLoading(false);
                     isLoadingRef.current = false;
-                    setStreamingContent(""); 
+                    setStreamingContent("");
                 });
         }, 100);
         return () => clearTimeout(timeoutId);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // ── Bug 2 Fix: Extract file text instead of uploading to DB ──
+    const handleFileAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []);
-        const token = getToken();
-        if (!token) { alert("Please log in to upload files"); return; }
         if (files.length === 0) return;
+        if (e.target) e.target.value = "";
 
         for (const file of files) {
-            setUploadedFiles(prev => [...prev, { name: file.name, status: 'uploading' }]);
+            const placeholder: AttachedFile = {
+                name: file.name,
+                fileType: "unknown",
+                text: "",
+                charCount: 0,
+                truncated: false,
+                status: "extracting",
+            };
+            setAttachedFiles(prev => [...prev, placeholder]);
+
             try {
-                const formData = new FormData();
-                formData.append('file', file);
-                if (selectedRepoId) formData.append('repository_id', selectedRepoId.toString());
-
-                const response = await fetch(`${API_BASE}/files/upload`, {
-                    method: 'POST',
-                    headers: { Authorization: `Bearer ${token}` },
-                    body: formData,
-                });
-
-                if (response.ok) {
-                    setUploadedFiles(prev => prev.map(f => f.name === file.name ? { ...f, status: 'success' } : f));
-                    const repoResponse = await fetch(`${API_BASE}/repo`, { headers: { Authorization: `Bearer ${token}` } });
-                    if (repoResponse.ok) {
-                        const data = await repoResponse.json();
-                        setRepositories(data.repositories || []);
-                    }
-                } else {
-                    const errorData = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
-                    console.error('Upload failed:', errorData);
-                    setUploadedFiles(prev => prev.map(f => f.name === file.name ? { ...f, status: 'error' } : f));
-                }
+                const result = await apiClient.extractFileText(file);
+                setAttachedFiles(prev => prev.map(f =>
+                    f.name === file.name && f.status === "extracting"
+                        ? { ...f, ...result, status: "ready" as const }
+                        : f
+                ));
             } catch (err) {
-                console.error('Upload network error:', err);
-                setUploadedFiles(prev => prev.map(f => f.name === file.name ? { ...f, status: 'error' } : f));
+                const msg = err instanceof Error ? err.message : "Extraction failed";
+                setAttachedFiles(prev => prev.map(f =>
+                    f.name === file.name && f.status === "extracting"
+                        ? { ...f, status: "error" as const, error: msg }
+                        : f
+                ));
             }
         }
-        if (e.target) e.target.value = '';
+    };
+
+    const removeAttachedFile = (name: string) => {
+        setAttachedFiles(prev => prev.filter(f => f.name !== name));
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -213,7 +266,7 @@ export default function ChatInterface() {
             if (useStreaming) {
                 let fullContent = "";
                 await apiClient.streamMessage(
-                    { message: currentInput, session_id: sessionId || undefined, history, repository_id: selectedRepoId || undefined, provider },
+                    { message: currentInput, conversation_id: conversationId || undefined, session_id: sessionId || undefined, history, repository_id: selectedRepoId || undefined, provider },
                     (chunk) => { fullContent += chunk; setStreamingContent(fullContent); },
                     () => {
                         const aiMessage: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: fullContent, timestamp: new Date() };
@@ -242,18 +295,42 @@ export default function ChatInterface() {
 
     const handleNonStreamingResponse = async (message: string, history: ApiChatMessage[]) => {
         try {
+            // Build inline context from attached files
+            const readyFiles = attachedFiles.filter(f => f.status === "ready");
+            let fileContext: string | undefined;
+            if (readyFiles.length > 0) {
+                fileContext = readyFiles.map(f => {
+                    const typeLabel =
+                        f.fileType === "pdf" ? "📄 PDF" :
+                        f.fileType === "word" ? "📝 Word Doc" :
+                        f.fileType === "image" ? "🖼️ Image" : "📄 File";
+                    return `=== Attached ${typeLabel}: ${f.name} ===\n${f.text}\n=== End of ${f.name} ===`;
+                }).join("\n\n");
+            }
+
             const response = await apiClient.sendMessage({
                 message,
+                conversation_id: conversationId || undefined,
                 session_id: sessionId || undefined,
                 history,
                 repository_id: selectedRepoId || undefined,
                 provider,
+                context: fileContext,
             });
             setSessionId(response.session_id);
+            if (response.conversation_id) {
+                setConversationId(response.conversation_id);
+            }
+            // Clear ready files after successful send
+            if (readyFiles.length > 0) {
+                setAttachedFiles([]);
+            }
             // Save to recent chats on the very first exchange
             if (!sessionId && response.session_id) {
-                const title = message.slice(0, 40) + (message.length > 40 ? '...' : '');
+                const title = message.slice(0, 40) + (message.length > 40 ? "..." : "");
                 saveRecentChat(response.session_id, title);
+                // Notify sidebar to refresh its list
+                window.dispatchEvent(new CustomEvent("conversation-updated"));
             }
             const aiMessage: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: response.message, timestamp: new Date() };
             setMessages((prev) => [...prev, aiMessage]);
@@ -293,7 +370,7 @@ export default function ChatInterface() {
                             <span className="flex-1 text-left text-[#E6F1EC] truncate">
                                 {selectedRepo ? selectedRepo.name : "No repository"}
                             </span>
-                            <svg className={`w-4 h-4 text-[#5A7268] transition-transform ${showRepoDropdown ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className={`w-4 h-4 text-[#5A7268] transition-transform ${showRepoDropdown ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                             </svg>
                         </button>
@@ -302,7 +379,7 @@ export default function ChatInterface() {
                             <div className="absolute top-full left-0 mt-2 w-64 bg-[#111917] border border-[#1F2D28] rounded-xl shadow-xl z-50 overflow-hidden">
                                 <button
                                     onClick={() => { setSelectedRepoId(null); setShowRepoDropdown(false); }}
-                                    className={`w-full px-3 py-2.5 text-left text-sm hover:bg-[#1A2420] transition-colors ${!selectedRepoId ? 'bg-[#2EFF7B]/10 text-[#2EFF7B]' : 'text-[#8FAEA2]'}`}
+                                    className={`w-full px-3 py-2.5 text-left text-sm hover:bg-[#1A2420] transition-colors ${!selectedRepoId ? "bg-[#2EFF7B]/10 text-[#2EFF7B]" : "text-[#8FAEA2]"}`}
                                 >
                                     No repository (general chat)
                                 </button>
@@ -310,7 +387,7 @@ export default function ChatInterface() {
                                     <button
                                         key={repo.id}
                                         onClick={() => { setSelectedRepoId(repo.id); setShowRepoDropdown(false); }}
-                                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-[#1A2420] transition-colors ${selectedRepoId === repo.id ? 'bg-[#2EFF7B]/10 text-[#2EFF7B]' : 'text-[#8FAEA2]'}`}
+                                        className={`w-full flex items-center gap-2 px-3 py-2.5 text-left text-sm hover:bg-[#1A2420] transition-colors ${selectedRepoId === repo.id ? "bg-[#2EFF7B]/10 text-[#2EFF7B]" : "text-[#8FAEA2]"}`}
                                     >
                                         <span className="truncate">{repo.name}</span>
                                         <span className="text-xs text-[#5A7268]">({repo.file_count})</span>
@@ -330,15 +407,16 @@ export default function ChatInterface() {
                     <div className="relative">
                         <select
                             value={provider}
-                            onChange={(e) => setProvider(e.target.value as "gemini" | "qwen" | "qwen-cloud" | "gemma4" | "gpt-oss-cloud" | "kimi-cloud" | "minimax-cloud")}
-                            className={`appearance-none cursor-pointer px-3 py-1.5 pr-7 rounded-lg text-xs font-medium transition-all duration-200 border focus:outline-none ${provider === "gemini"
+                            onChange={(e) => setProvider(e.target.value as typeof provider)}
+                            className={`appearance-none cursor-pointer px-3 py-1.5 pr-7 rounded-lg text-xs font-medium transition-all duration-200 border focus:outline-none ${
+                                provider === "gemini"
                                     ? "bg-[#2EFF7B]/10 text-[#2EFF7B] border-[#2EFF7B]/30 hover:bg-[#2EFF7B]/20"
                                     : provider === "gemma4"
                                         ? "bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20"
                                         : provider.endsWith("-cloud")
                                             ? "bg-orange-500/10 text-orange-400 border-orange-500/30 hover:bg-orange-500/20"
                                             : "bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20"
-                                }`}
+                            }`}
                             aria-label="AI model"
                         >
                             <option value="gemini">✦ Gemini</option>
@@ -389,16 +467,38 @@ export default function ChatInterface() {
             {/* Input */}
             <div className="shrink-0 p-4 border-t border-[#1F2D28] bg-[#111917]">
                 <div className="flex flex-col bg-[#1A2420] border border-[#1F2D28] rounded-2xl p-2 shadow-sm focus-within:border-[#2EFF7B]/50 transition-colors">
-                    {uploadedFiles.length > 0 && (
+                    {/* Attached Files Preview */}
+                    {attachedFiles.length > 0 && (
                         <div className="mb-2 flex flex-wrap gap-2 px-2 pt-1">
-                            {uploadedFiles.map((file, idx) => (
-                                <span key={idx} className={`text-xs px-2 py-1 rounded-lg ${file.status === 'success' ? 'bg-[#2EFF7B]/10 text-[#2EFF7B] border border-[#2EFF7B]/30' : file.status === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/30' : 'bg-[#1A2420] text-[#8FAEA2] border border-[#1F2D28]'}`}>
-                                    {file.status === 'uploading' ? '⏳' : file.status === 'success' ? '✓' : '✕'} {file.name}
+                            {attachedFiles.map((file, idx) => (
+                                <span
+                                    key={idx}
+                                    title={file.error || (file.status === "ready" ? `${file.charCount.toLocaleString()} chars extracted${file.truncated ? " (truncated)" : ""}` : "")}
+                                    className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${
+                                        file.status === "ready"
+                                            ? "bg-[#2EFF7B]/10 text-[#2EFF7B] border-[#2EFF7B]/30"
+                                            : file.status === "error"
+                                                ? "bg-red-500/10 text-red-400 border-red-500/30"
+                                                : "bg-[#1A2420] text-[#8FAEA2] border-[#1F2D28] animate-pulse"
+                                    }`}
+                                >
+                                    {file.status === "extracting" ? "⏳" : file.status === "ready" ? (
+                                        file.fileType === "pdf" ? "📄" :
+                                        file.fileType === "word" ? "📝" :
+                                        file.fileType === "image" ? "🖼️" : "📄"
+                                    ) : "✕"}
+                                    <span className="max-w-[120px] truncate">{file.name}</span>
+                                    {file.status !== "extracting" && (
+                                        <button
+                                            onClick={() => removeAttachedFile(file.name)}
+                                            className="ml-1 opacity-60 hover:opacity-100"
+                                        >×</button>
+                                    )}
                                 </span>
                             ))}
-                            <button onClick={() => setUploadedFiles([])} className="text-xs text-[#5A7268] hover:text-red-400">Clear</button>
                         </div>
                     )}
+
                     <form onSubmit={handleSubmit} className="flex flex-col">
                         <textarea
                             ref={inputRef}
@@ -408,28 +508,38 @@ export default function ChatInterface() {
                             placeholder="Ask me anything about code..."
                             rows={1}
                             className="w-full bg-transparent px-3 py-2 text-sm text-[#E6F1EC] placeholder-[#5A7268] focus:outline-none resize-none"
-                            style={{ maxHeight: '200px' }}
+                            style={{ maxHeight: "200px" }}
                         />
                         <div className="flex justify-between items-center px-1 mt-1">
                             <div className="flex items-center gap-1">
-                                <input ref={fileInputRef} type="file" multiple onChange={handleFileUpload} className="hidden" accept=".py,.js,.ts,.tsx,.jsx,.java,.cpp,.c,.go,.rs,.md,.json,.pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.svg,.bmp,.txt" />
+                                {/* File attachment — extract-text approach */}
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    multiple
+                                    onChange={handleFileAttach}
+                                    className="hidden"
+                                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.bmp,.txt,.md,.py,.js,.ts,.tsx,.jsx,.java,.cpp,.c,.go,.rs,.json,.yaml,.yml,.sql,.sh,.csv,.xml,.html,.css"
+                                />
                                 <button
                                     type="button"
                                     onClick={() => fileInputRef.current?.click()}
                                     className="p-2 text-[#5A7268] hover:text-[#8FAEA2] rounded-lg transition-colors"
-                                    title="Attach files"
+                                    title="Attach file (PDF, Word, Image, Code)"
                                 >
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                                    </svg>
                                 </button>
                             </div>
                             <div className="flex items-center gap-3">
                                 <label className="flex items-center gap-2 cursor-pointer group">
                                     <div className="relative flex items-center">
                                         <input type="checkbox" className="sr-only" checked={planMode} onChange={(e) => setPlanMode(e.target.checked)} />
-                                        <div className={`block w-9 h-5 rounded-full transition-colors ${planMode ? 'bg-[#2EFF7B]/20' : 'bg-[#111917] border border-[#1F2D28]'}`}></div>
-                                        <div className={`absolute left-1 top-1 w-3 h-3 rounded-full transition-transform ${planMode ? 'translate-x-4 bg-[#2EFF7B]' : 'bg-[#5A7268] group-hover:bg-[#8FAEA2]'}`}></div>
+                                        <div className={`block w-9 h-5 rounded-full transition-colors ${planMode ? "bg-[#2EFF7B]/20" : "bg-[#111917] border border-[#1F2D28]"}`}></div>
+                                        <div className={`absolute left-1 top-1 w-3 h-3 rounded-full transition-transform ${planMode ? "translate-x-4 bg-[#2EFF7B]" : "bg-[#5A7268] group-hover:bg-[#8FAEA2]"}`}></div>
                                     </div>
-                                    <span className={`text-xs transition-colors ${planMode ? 'text-[#2EFF7B]' : 'text-[#5A7268] group-hover:text-[#8FAEA2]'}`}>Plan</span>
+                                    <span className={`text-xs transition-colors ${planMode ? "text-[#2EFF7B]" : "text-[#5A7268] group-hover:text-[#8FAEA2]"}`}>Plan</span>
                                 </label>
 
                                 <button
@@ -437,15 +547,19 @@ export default function ChatInterface() {
                                     className="p-1.5 text-[#5A7268] hover:text-[#8FAEA2] rounded-lg transition-colors ml-1"
                                     aria-label="Expand"
                                 >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6"></path><path d="M9 21H3v-6"></path><path d="M21 3l-7 7"></path><path d="M3 21l7-7"></path></svg>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M15 3h6v6" /><path d="M9 21H3v-6" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" />
+                                    </svg>
                                 </button>
 
                                 <button
                                     type="submit"
-                                    disabled={!input.trim() || isLoading}
+                                    disabled={!input.trim() || isLoading || attachedFiles.some(f => f.status === "extracting")}
                                     className="p-2 ml-1 bg-[#2EFF7B] text-[#0B0F0E] rounded-lg hover:bg-[#1ED760] disabled:opacity-50 disabled:bg-[#1A2420] disabled:text-[#5A7268] transition-colors"
                                 >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
+                                    </svg>
                                 </button>
                             </div>
                         </div>

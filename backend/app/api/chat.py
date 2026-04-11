@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from typing import AsyncGenerator, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,30 +46,83 @@ def get_ai_service(provider: str = "qwen-cloud"):
 
 
 @router.post("/message", response_model=ChatResponse)
-async def send_message(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def send_message(
+    request: ChatRequest,
+    raw_request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     """Send a message and get AI response with optional RAG context."""
+    from app.services.conversation_service import ConversationService
+    from app.services.context_manager import ContextManager
+    from app.services.redis_memory import get_redis_memory
+    from app.core.security import decode_token
+
+    # ── Resolve user from JWT (best-effort, no hard auth gate) ──
+    user_id = 1  # fallback for unauthenticated usage
+    try:
+        auth_header = raw_request.headers.get("authorization", "") if raw_request else ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = decode_token(token)
+            if payload and payload.get("sub"):
+                user_id = int(payload["sub"])
+    except Exception:
+        pass
+
     ai_service = get_ai_service(request.provider or "qwen-cloud")
-    
-    # Convert history to dict format
-    history = None
-    if request.history:
-        history = [{"role": msg.role, "content": msg.content} for msg in request.history]
-    
+    conv_service = ConversationService(db)
+    redis_mem = get_redis_memory()
+    ctx_mgr = ContextManager(redis_mem, conv_service)
+
+    # ── Memory: get or create conversation ──
+    conversation = None
+    if request.conversation_id:
+        conversation = await conv_service.get(request.conversation_id)
+    if not conversation:
+        title = request.message[:40] + ("..." if len(request.message) > 40 else "")
+        conversation = await conv_service.create(
+            user_id=user_id,
+            title=title,
+        )
+
+    # ── Memory: load history from DB (not from frontend) ──
+    history_msgs = await ctx_mgr.get_context_messages(conversation.id)
+    history = ctx_mgr.to_chat_history_dicts(history_msgs)
+
     # Get RAG context if repository is specified
     context = request.context
     context_used = False
     if request.repository_id and not context:
         context = await get_rag_context(db, request.message, request.repository_id)
-    
+
     if context:
         context_used = True
-    
-    # Generate response with context
+
+    # Generate response with DB-backed history
     response = await ai_service.generate_response(request.message, history, context)
-    
+
     session_id = request.session_id or str(uuid.uuid4())
-    
-    return ChatResponse(message=response, session_id=session_id, context_used=context_used)
+
+    # ── Memory: persist messages ──
+    try:
+        await conv_service.add_message(conversation.id, "user", request.message)
+        await redis_mem.push_message(conversation.id, "user", request.message)
+
+        await conv_service.add_message(
+            conversation.id, "assistant", response,
+            metadata={"provider": request.provider, "context_used": context_used}
+        )
+        await redis_mem.push_message(conversation.id, "assistant", response)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to persist chat memory: {e}")
+
+    return ChatResponse(
+        message=response,
+        session_id=session_id,
+        conversation_id=conversation.id,
+        context_used=context_used,
+    )
 
 
 @router.post("/stream")

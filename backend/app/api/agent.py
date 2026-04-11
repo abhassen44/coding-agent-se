@@ -73,6 +73,7 @@ async def agent_stream(
             prompt=request.prompt,
             file_paths=request.file_paths,
             provider=request.provider or "auto",
+            conversation_id=request.conversation_id,
         ):
             yield f"data: {json.dumps(event)}\n\n"
 
