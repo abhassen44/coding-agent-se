@@ -1,5 +1,6 @@
 """Workspace service for managing persistent Docker sandbox environments."""
 import os
+import shlex
 import asyncio
 import logging
 from datetime import datetime
@@ -311,7 +312,10 @@ class WorkspaceService:
         workspace = await self._get_running(workspace_id, user_id)
         full_path = self._resolve_path(workspace.work_dir, path)
 
-        output = await self._exec(workspace.container_id, f"ls -laF --group-directories-first {full_path}")
+        output = await self._exec(
+            workspace.container_id,
+            f"ls -laF --group-directories-first -- {self._shell_quote(full_path)}",
+        )
         entries = []
         for line in output.strip().split("\n"):
             if line.startswith("total") or not line.strip():
@@ -339,7 +343,10 @@ class WorkspaceService:
         workspace = await self._get_running(workspace_id, user_id)
         full_path = self._resolve_path(workspace.work_dir, path)
 
-        content = await self._exec(workspace.container_id, f"cat {full_path}")
+        content = await self._exec(
+            workspace.container_id,
+            f"cat -- {self._shell_quote(full_path)}",
+        )
 
         # Detect language
         ext = ""
@@ -356,11 +363,15 @@ class WorkspaceService:
         """Write content to a file in the workspace."""
         workspace = await self._get_running(workspace_id, user_id)
         full_path = self._resolve_path(workspace.work_dir, path)
+        quoted_path = self._shell_quote(full_path)
 
         # Ensure parent directory exists
         parent_dir = "/".join(full_path.split("/")[:-1])
         if parent_dir:
-            await self._exec(workspace.container_id, f"mkdir -p {parent_dir}")
+            await self._exec(
+                workspace.container_id,
+                f"mkdir -p -- {self._shell_quote(parent_dir)}",
+            )
 
         # Write file using base64 encoding to safely handle ANY content
         # (heredoc + shell escaping breaks on code with quotes, backslashes, $, etc.)
@@ -368,10 +379,25 @@ class WorkspaceService:
         encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
         await self._exec(
             workspace.container_id,
-            f"echo '{encoded}' | base64 -d > {full_path}"
+            f"printf '%s' {self._shell_quote(encoded)} | base64 -d > {quoted_path}",
         )
 
-        # Verify write by checking file exists
+        # Verify the write actually landed (catch silent pipeline failures)
+        verify_out = await self._exec(
+            workspace.container_id,
+            f"wc -c < {quoted_path}",
+        )
+        expected_bytes = len(content.encode("utf-8"))
+        try:
+            actual_bytes = int(verify_out.strip())
+        except ValueError:
+            raise ValueError(f"Write verification failed for {path}: unexpected wc output: {verify_out!r}")
+        if abs(actual_bytes - expected_bytes) > 1:  # 1 byte tolerance for trailing newline
+            raise ValueError(
+                f"Write verification failed for {path}: "
+                f"expected ~{expected_bytes} bytes, got {actual_bytes}"
+            )
+
         workspace.last_accessed_at = datetime.utcnow()
         await self.db.commit()
 
@@ -383,22 +409,29 @@ class WorkspaceService:
         """Create a new file or directory."""
         workspace = await self._get_running(workspace_id, user_id)
         full_path = self._resolve_path(workspace.work_dir, path)
+        quoted_path = self._shell_quote(full_path)
 
         if is_directory:
-            await self._exec(workspace.container_id, f"mkdir -p {full_path}")
+            await self._exec(workspace.container_id, f"mkdir -p -- {quoted_path}")
         else:
             parent = "/".join(full_path.split("/")[:-1])
             if parent:
-                await self._exec(workspace.container_id, f"mkdir -p {parent}")
+                await self._exec(
+                    workspace.container_id,
+                    f"mkdir -p -- {self._shell_quote(parent)}",
+                )
             if content:
                 import base64
                 encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
                 await self._exec(
                     workspace.container_id,
-                    f"echo '{encoded}' | base64 -d > {full_path}"
+                    f"printf '%s' {self._shell_quote(encoded)} | base64 -d > {quoted_path}",
                 )
             else:
-                await self._exec(workspace.container_id, f"touch {full_path}")
+                await self._exec(workspace.container_id, f"touch -- {quoted_path}")
+
+        workspace.last_accessed_at = datetime.utcnow()
+        await self.db.commit()
 
         return {"path": path, "type": "dir" if is_directory else "file", "status": "created"}
 
@@ -411,7 +444,12 @@ class WorkspaceService:
         if full_path.rstrip("/") == workspace.work_dir.rstrip("/"):
             raise ValueError("Cannot delete workspace root directory")
 
-        await self._exec(workspace.container_id, f"rm -rf {full_path}")
+        await self._exec(
+            workspace.container_id,
+            f"rm -rf -- {self._shell_quote(full_path)}",
+        )
+        workspace.last_accessed_at = datetime.utcnow()
+        await self.db.commit()
         return {"path": path, "status": "deleted"}
 
     # ── Helpers ─────────────────────────────────────────────────
@@ -438,21 +476,31 @@ class WorkspaceService:
             return work_dir
         return f"{work_dir}/{clean}"
 
-    async def _exec(self, container_id: str, command: str) -> str:
+    @staticmethod
+    def _shell_quote(value: str) -> str:
+        """Quote shell arguments before passing them to `docker exec`."""
+        return shlex.quote(value)
+
+    async def _exec(self, container_id: str, command: str, check: bool = True) -> str:
         """Execute a command inside a container and return stdout."""
         output = await asyncio.get_event_loop().run_in_executor(
-            None, self._exec_sync, container_id, command
+            None, self._exec_sync, container_id, command, check
         )
         return output
 
-    def _exec_sync(self, container_id: str, command: str) -> str:
+    def _exec_sync(self, container_id: str, command: str, check: bool = True) -> str:
         """Blocking exec inside container."""
         try:
             container = self.docker_client.containers.get(container_id)
-            exit_code, output = container.exec_run(command, workdir="/workspace")
+            exit_code, output = container.exec_run(
+                ["/bin/sh", "-c", command], workdir="/workspace"
+            )
             text = output.decode("utf-8", errors="replace")
             if exit_code != 0:
                 logger.debug(f"Command '{command[:50]}' exited with {exit_code}: {text[:200]}")
+                if check:
+                    error_text = text.strip() or f"Command failed with exit code {exit_code}"
+                    raise ValueError(error_text)
             return text
         except NotFound:
             raise ValueError("Workspace container not found. It may have been removed.")

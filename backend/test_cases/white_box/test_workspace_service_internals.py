@@ -234,6 +234,30 @@ class TestDeleteFileGuard:
         svc._exec.assert_called_once()
 
 
+class TestQuotedWorkspaceCommands:
+    """White Box: shell commands should be quoted and non-zero exits should fail loudly."""
+
+    @pytest.mark.asyncio
+    async def test_wb_ws_17_write_file_quotes_paths_with_spaces(self, db, ws_user, running_workspace):
+        svc = make_service(db)
+        svc._exec = AsyncMock(return_value="")
+
+        await svc.write_file(running_workspace.id, ws_user.id, "src/My Folder/app.py", "print('ok')\n")
+
+        commands = [call.args[1] for call in svc._exec.await_args_list]
+        assert any("mkdir -p -- '/workspace/src/My Folder'" in command for command in commands)
+        assert any("> '/workspace/src/My Folder/app.py'" in command for command in commands)
+
+    def test_wb_ws_18_exec_sync_raises_on_non_zero_exit(self, db):
+        svc = make_service(db)
+        container = MagicMock()
+        container.exec_run.return_value = (1, b"cat: missing.txt: No such file or directory")
+        svc.docker_client.containers.get.return_value = container
+
+        with pytest.raises(ValueError, match="No such file or directory"):
+            svc._exec_sync("container_abc", "cat missing.txt")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # WB-WS-17 … WB-WS-19  │  list_workspaces — destroyed exclusion
 # ─────────────────────────────────────────────────────────────────────────────

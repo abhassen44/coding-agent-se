@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import Any
-from sqlalchemy import String, DateTime, Integer, func, Text
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import String, DateTime, Integer, JSON, func, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -16,7 +15,7 @@ class ActivityLog(Base):
     user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     action: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     # Stores extra context: repo_id, workspace_id, error message, etc.
-    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, nullable=False, default=dict)
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

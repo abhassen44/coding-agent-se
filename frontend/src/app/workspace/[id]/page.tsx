@@ -33,6 +33,10 @@ interface OpenFile {
     language?: string;
 }
 
+interface FileChangeOptions {
+    refreshOpenEditors?: boolean;
+}
+
 export default function WorkspacePage() {
     const params = useParams();
     const router = useRouter();
@@ -46,10 +50,13 @@ export default function WorkspacePage() {
     // File system state
     const [fileTree, setFileTree] = useState<FileNode[]>([]);
     const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+    const [explorerRefreshKey, setExplorerRefreshKey] = useState(0);
 
     // Editor state
     const [openFiles, setOpenFiles] = useState<Record<string, OpenFile>>({});
     const [activePath, setActivePath] = useState<string | null>(null);
+    const openFilesRef = useRef(openFiles);
+    openFilesRef.current = openFiles;
 
     const [showTerminal, setShowTerminal] = useState(false);
 
@@ -143,6 +150,7 @@ export default function WorkspacePage() {
             const data = await apiClient.listWorkspaceFiles(id, path);
             if (path === '.') {
                 setFileTree(data.entries);
+                setExplorerRefreshKey((prev) => prev + 1);
             }
             return data.entries;
         } catch (error) {
@@ -312,8 +320,8 @@ export default function WorkspacePage() {
             await apiClient.deleteWorkspaceFile(id, path);
             fetchFiles('.');
             
-            if (openFiles[path]) {
-                handleTabClose(path);
+            if (openFilesRef.current[path]) {
+                closeFileSilently(path);
             }
         } catch (error) {
             alert(getErrorMessage(error, 'Failed to delete'));
@@ -355,6 +363,21 @@ export default function WorkspacePage() {
         }
     };
 
+    const closeFileSilently = useCallback((path: string) => {
+        setOpenFiles(prev => {
+            if (!prev[path]) return prev;
+            const next = { ...prev };
+            delete next[path];
+            return next;
+        });
+
+        setActivePath(prev => {
+            if (prev !== path) return prev;
+            const remaining = Object.keys(openFilesRef.current).filter(p => p !== path);
+            return remaining.length > 0 ? remaining[remaining.length - 1] : null;
+        });
+    }, []);
+
     const handleTabClose = (path: string) => {
         const file = openFiles[path];
         if (file && file.content !== file.originalContent) {
@@ -363,45 +386,52 @@ export default function WorkspacePage() {
             }
         }
 
-        setOpenFiles(prev => {
-            const next = { ...prev };
-            delete next[path];
-            return next;
-        });
-
-        if (activePath === path) {
-            const remaining = Object.keys(openFiles).filter(p => p !== path);
-            setActivePath(remaining.length > 0 ? remaining[remaining.length - 1] : null);
-        }
+        closeFileSilently(path);
     };
 
-    const handleFileChanged = useCallback(async (changedPaths?: string[]) => {
-        fetchFiles('.');
+    const handleFileChanged = useCallback(async (
+        changedPaths?: string[],
+        options: FileChangeOptions = {}
+    ) => {
+        await fetchFiles('.');
+
+        const pathsToRefresh = new Set<string>();
+
+        if (options.refreshOpenEditors || !changedPaths || changedPaths.length === 0) {
+            Object.keys(openFilesRef.current).forEach((path) => pathsToRefresh.add(path));
+        }
 
         if (changedPaths && changedPaths.length > 0) {
             for (const path of changedPaths) {
-                try {
-                    const data = await apiClient.readWorkspaceFile(id, path);
-                    // Use updater pattern so we always check the LATEST openFiles state,
-                    // not a stale closure from when the SSE stream started
-                    setOpenFiles(prev => {
-                        if (!prev[path]) return prev; // file not open, nothing to refresh
-                        return {
-                            ...prev,
-                            [path]: {
-                                ...prev[path],
-                                content: data.content,
-                                originalContent: data.content,
-                                language: data.language
-                            }
-                        };
-                    });
-                } catch (error) {
-                    console.error(`Failed to refresh file ${path}:`, error);
+                if (openFilesRef.current[path]) {
+                    pathsToRefresh.add(path);
                 }
             }
         }
-    }, [id, fetchFiles]);
+
+        await Promise.all(Array.from(pathsToRefresh).map(async (path) => {
+            try {
+                const data = await apiClient.readWorkspaceFile(id, path);
+                setOpenFiles(prev => {
+                    if (!prev[path]) return prev;
+                    return {
+                        ...prev,
+                        [path]: {
+                            ...prev[path],
+                            content: data.content,
+                            originalContent: data.content,
+                            language: data.language
+                        }
+                    };
+                });
+            } catch (error) {
+                console.error(`Failed to refresh file ${path}:`, error);
+                if (openFilesRef.current[path]) {
+                    closeFileSilently(path);
+                }
+            }
+        }));
+    }, [id, fetchFiles, closeFileSilently]);
 
     // --- Render Helpers ---
 
@@ -585,6 +615,7 @@ export default function WorkspacePage() {
                                         </div>
                                     ) : null}
                                     <FileExplorer 
+                                        key={explorerRefreshKey}
                                         entries={fileTree}
                                         onFileSelect={handleFileSelect}
                                         selectedPath={activePath || undefined}

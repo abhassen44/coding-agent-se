@@ -42,7 +42,10 @@ interface WorkspaceChatProps {
     isVisible: boolean;
     activeFilePath?: string | null;
     openFilePaths?: string[];
-    onFileChanged?: (changedPaths?: string[]) => void;
+    onFileChanged?: (
+        changedPaths?: string[],
+        options?: { refreshOpenEditors?: boolean }
+    ) => void | Promise<void>;
 }
 
 const PROVIDER_OPTIONS: Array<{ value: AgentProvider; label: string }> = [
@@ -267,8 +270,15 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                                 })
                                 .filter((path) => path.length > 0);
 
-                            if (changedPaths.length > 0 && onFileChangedRef.current) {
-                                onFileChangedRef.current(changedPaths);
+                            const refreshOpenEditors = event.actions.some(
+                                (action) => action.type === 'run_command'
+                            );
+
+                            if ((changedPaths.length > 0 || refreshOpenEditors) && onFileChangedRef.current) {
+                                void onFileChangedRef.current(
+                                    changedPaths.length > 0 ? changedPaths : undefined,
+                                    { refreshOpenEditors }
+                                );
                             }
                         }
                         break;
