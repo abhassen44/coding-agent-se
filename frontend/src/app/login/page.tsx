@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { setStoredAuthTokens } from '@/lib/auth';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -27,14 +28,16 @@ export default function LoginPage() {
 
             if (response.ok) {
                 const data = await response.json();
-                localStorage.setItem('auth_token', data.access_token);
-                localStorage.setItem('refresh_token', data.refresh_token);
+                setStoredAuthTokens({
+                    accessToken: data.access_token,
+                    refreshToken: data.refresh_token,
+                });
                 router.push('/chat');
             } else {
                 const errorData = await response.json();
                 setError(errorData.detail || 'Login failed');
             }
-        } catch (err) {
+        } catch {
             setError('Network error. Please try again.');
         } finally {
             setIsLoading(false);
@@ -103,7 +106,7 @@ export default function LoginPage() {
                     {/* Footer */}
                     <div className="mt-6 pt-6 border-t border-[#1F2D28] text-center">
                         <p className="text-[#5A7268]">
-                            Don't have an account?{' '}
+                            Don&apos;t have an account?{' '}
                             <Link href="/register" className="text-[#2EFF7B] hover:underline font-medium">
                                 Create one
                             </Link>

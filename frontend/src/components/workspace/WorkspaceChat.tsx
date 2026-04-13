@@ -6,21 +6,15 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { AgentAction, AgentProvider, AgentStreamEvent, apiClient, ConversationMessage } from '@/lib/api';
-import { DiffViewer } from './DiffViewer';
 import {
-    Bot,
     CheckCircle2,
     ChevronDown,
     ChevronUp,
-    Code2,
     Cpu,
     Loader2,
-    Send,
     Sparkles,
     Square,
-    TerminalSquare,
     Trash2,
-    User,
     Wrench,
     XCircle,
 } from 'lucide-react';
@@ -80,7 +74,6 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
     const [streamingTools, setStreamingTools] = useState<ToolCallCard[]>([]);
     const [streamingModel, setStreamingModel] = useState('');
     const [conversationId, setConversationId] = useState<number | null>(null);
-    const [historyLoaded, setHistoryLoaded] = useState(false);
 
     const [planMode, setPlanMode] = useState(false);
     const [provider, setProvider] = useState<AgentProvider>('qwen-cloud');
@@ -126,7 +119,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
             } catch (err) {
                 console.warn('Failed to load conversation history:', err);
             } finally {
-                if (!cancelled) setHistoryLoaded(true);
+                // Conversation history load is best-effort.
             }
         })();
         return () => { cancelled = true; };
@@ -262,18 +255,17 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                         // Re-fetch files that were edited/created
                         if (event.actions && event.actions.length > 0) {
                             const changedPaths = event.actions
-                                .filter((a: any) => ['file_edit', 'file_create', 'file_delete'].includes(a.type))
-                                .map((a: any) => {
-                                    if (typeof a.path === 'string') {
-                                        let cleaned = a.path;
-                                        if (cleaned.startsWith('/workspace/')) cleaned = cleaned.replace('/workspace/', '');
-                                        if (cleaned.startsWith('./')) cleaned = cleaned.substring(2);
-                                        if (cleaned.startsWith('/')) cleaned = cleaned.substring(1);
-                                        return cleaned;
-                                    }
-                                    return null;
+                                .filter((action): action is AgentAction & { path: string } =>
+                                    ['file_edit', 'file_create', 'file_delete'].includes(action.type) && typeof action.path === 'string'
+                                )
+                                .map((action) => {
+                                    let cleaned = action.path;
+                                    if (cleaned.startsWith('/workspace/')) cleaned = cleaned.replace('/workspace/', '');
+                                    if (cleaned.startsWith('./')) cleaned = cleaned.substring(2);
+                                    if (cleaned.startsWith('/')) cleaned = cleaned.substring(1);
+                                    return cleaned;
                                 })
-                                .filter((p: any) => typeof p === 'string' && p.length > 0);
+                                .filter((path) => path.length > 0);
 
                             if (changedPaths.length > 0 && onFileChangedRef.current) {
                                 onFileChangedRef.current(changedPaths);
@@ -331,7 +323,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
         );
 
         abortControllerRef.current = controller;
-    }, [input, isStreaming, workspaceId, contextFilePaths, provider, conversationId]);
+    }, [input, workspaceId, contextFilePaths, provider, conversationId]);
 
     const handleClearHistory = useCallback(async () => {
         if (!conversationId) return;
@@ -462,7 +454,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                                 <ReactMarkdown
                                     remarkPlugins={[remarkGfm]}
                                     components={{
-                                        code({ node, className, children, ...props }) {
+                                        code({ className, children, ...props }) {
                                             const match = /language-(\w+)/.exec(className || "");
                                             const codeString = String(children).replace(/\n$/, "");
                                             const lang = match ? match[1] : "";

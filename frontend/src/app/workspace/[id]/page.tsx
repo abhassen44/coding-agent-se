@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { apiClient, WorkspaceResponse, FileNode } from '@/lib/api';
+import { apiClient, WorkspaceResponse, FileNode, getErrorMessage } from '@/lib/api';
 import { FileExplorer } from '@/components/workspace/FileExplorer';
 import { EditorTabs, EditorTab } from '@/components/workspace/EditorTabs';
 import { CodeEditor } from '@/components/workspace/CodeEditor';
@@ -135,20 +135,6 @@ export default function WorkspacePage() {
     const statusRef = React.useRef(status);
     statusRef.current = status;
 
-    const fetchWorkspace = useCallback(async (silent = false) => {
-        try {
-            if (!silent) setStatus('loading');
-            const data = await apiClient.getWorkspace(id);
-            setWorkspace(data);
-            setStatus(data.status);
-            return data;
-        } catch (err: any) {
-            setError(err.detail || 'Failed to load workspace');
-            setStatus('error');
-            return null;
-        }
-    }, [id]);
-
     const fetchFiles = useCallback(async (path: string = '.') => {
         // Use ref instead of state to avoid dependency changes
         if (statusRef.current !== 'running') return [];
@@ -159,8 +145,8 @@ export default function WorkspacePage() {
                 setFileTree(data.entries);
             }
             return data.entries;
-        } catch (err: any) {
-            console.error('Failed to load files:', err);
+        } catch (error) {
+            console.error('Failed to load files:', error);
             return [];
         } finally {
             setIsLoadingFiles(false);
@@ -172,8 +158,8 @@ export default function WorkspacePage() {
         try {
             const data = await apiClient.listWorkspaceFiles(id, path);
             return data.entries;
-        } catch (err: any) {
-            console.error('Failed to fetch children:', err);
+        } catch (error) {
+            console.error('Failed to fetch children:', error);
             return [];
         }
     }, [id]);
@@ -211,7 +197,7 @@ export default function WorkspacePage() {
                                     if (isMounted) setFileTree(files.entries);
                                 }
                             }
-                        } catch (err) {
+                        } catch {
                             // Silently ignore poll errors
                         }
                     }, 3000);
@@ -219,9 +205,9 @@ export default function WorkspacePage() {
                     const files = await apiClient.listWorkspaceFiles(id, '.');
                     if (isMounted) setFileTree(files.entries);
                 }
-            } catch (err: any) {
+            } catch (error) {
                 if (isMounted) {
-                    setError(err.detail || 'Failed to load workspace');
+                    setError(getErrorMessage(error, 'Failed to load workspace'));
                     setStatus('error');
                 }
             }
@@ -233,7 +219,6 @@ export default function WorkspacePage() {
             isMounted = false;
             if (pollInterval) clearInterval(pollInterval);
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [id]);
 
     // --- Workspace Actions ---
@@ -260,8 +245,8 @@ export default function WorkspacePage() {
                 await apiClient.destroyWorkspace(id);
                 router.push('/repository');
             }
-        } catch (err: any) {
-            setError(err.detail || `Failed to ${action} workspace`);
+        } catch (error) {
+            setError(getErrorMessage(error, `Failed to ${action} workspace`));
             setStatus('error');
         }
     };
@@ -290,8 +275,8 @@ export default function WorkspacePage() {
                 }
             }));
             setActivePath(node.path);
-        } catch (err: any) {
-            alert(err.detail || 'Failed to read file');
+        } catch (error) {
+            alert(getErrorMessage(error, 'Failed to read file'));
         }
     };
 
@@ -316,8 +301,8 @@ export default function WorkspacePage() {
                 }));
                 setActivePath(newPath);
             }
-        } catch (err: any) {
-            alert(err.detail || `Failed to create ${isDir ? 'folder' : 'file'}`);
+        } catch (error) {
+            alert(getErrorMessage(error, `Failed to create ${isDir ? 'folder' : 'file'}`));
         }
     };
 
@@ -330,8 +315,8 @@ export default function WorkspacePage() {
             if (openFiles[path]) {
                 handleTabClose(path);
             }
-        } catch (err: any) {
-            alert(err.detail || 'Failed to delete');
+        } catch (error) {
+            alert(getErrorMessage(error, 'Failed to delete'));
         }
     };
 
@@ -365,8 +350,8 @@ export default function WorkspacePage() {
             // Show save toast
             setShowSaveToast(true);
             setTimeout(() => setShowSaveToast(false), 2000);
-        } catch (err: any) {
-            alert(err.detail || 'Failed to save file');
+        } catch (error) {
+            alert(getErrorMessage(error, 'Failed to save file'));
         }
     };
 
@@ -411,8 +396,8 @@ export default function WorkspacePage() {
                             }
                         };
                     });
-                } catch (err: any) {
-                    console.error(`Failed to refresh file ${path}:`, err);
+                } catch (error) {
+                    console.error(`Failed to refresh file ${path}:`, error);
                 }
             }
         }

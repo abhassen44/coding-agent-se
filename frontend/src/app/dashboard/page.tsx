@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { clearStoredAuth, useAuthToken } from '@/lib/auth';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -19,42 +20,50 @@ export default function DashboardPage() {
     const [user, setUser] = useState<UserData | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+    const token = useAuthToken();
     const router = useRouter();
 
+    const handleLogout = React.useCallback(() => {
+        clearStoredAuth();
+        router.push('/login');
+    }, [router]);
+
     useEffect(() => {
-        const token = localStorage.getItem('auth_token');
         if (!token) {
             router.push('/login');
             return;
         }
-        fetchUserData(token);
-    }, [router]);
+        let cancelled = false;
 
-    const fetchUserData = async (token: string) => {
-        try {
-            const response = await fetch(`${API_BASE}/auth/me`, {
-                headers: { 'Authorization': `Bearer ${token}` },
-            });
+        const fetchUserData = async () => {
+            try {
+                const response = await fetch(`${API_BASE}/auth/me`, {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
 
-            if (response.ok) {
-                const data = await response.json();
-                setUser(data);
-            } else if (response.status === 401) {
-                // Token expired or invalid
-                handleLogout();
+                if (response.ok) {
+                    const data = await response.json();
+                    if (!cancelled) {
+                        setUser(data);
+                    }
+                } else if (response.status === 401) {
+                    handleLogout();
+                }
+            } catch (error) {
+                console.error('Failed to fetch user data:', error);
+            } finally {
+                if (!cancelled) {
+                    setIsLoading(false);
+                }
             }
-        } catch (error) {
-            console.error('Failed to fetch user data:', error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
+        };
 
-    const handleLogout = () => {
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('refresh_token');
-        router.push('/login');
-    };
+        fetchUserData();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [handleLogout, router, token]);
 
     const formatDate = (dateString: string) => {
         return new Date(dateString).toLocaleDateString('en-US', {

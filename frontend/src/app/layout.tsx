@@ -1,17 +1,6 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { TopNav, Sidebar } from "@/components/layout";
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-mono",
-  subsets: ["latin"],
-});
+import { AppShell } from "@/components/layout";
 
 export const metadata: Metadata = {
   title: "Intelligent Coding Agent",
@@ -24,16 +13,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body
-        className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased bg-[#0B0F0E] text-[#E6F1EC] overflow-x-hidden`}
-      >
-        <TopNav />
-        <Sidebar />
-        {/* Main content - responsive margin for sidebar */}
-        <main className="ml-0 md:ml-56 mt-14 min-h-[calc(100vh-3.5rem)] overflow-x-hidden">
-          {children}
-        </main>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className="font-sans antialiased bg-[#0B0F0E] text-[#E6F1EC] overflow-x-hidden">
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

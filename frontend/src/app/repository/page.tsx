@@ -31,7 +31,6 @@ export default function RepositoryPage() {
     const [searchQuery, setSearchQuery] = useState<string>('');
     const [searchResults, setSearchResults] = useState<ChunkResult[]>([]);
     const [isSearching, setIsSearching] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showRepoDropdown, setShowRepoDropdown] = useState(false);
     const [showActionsDropdown, setShowActionsDropdown] = useState(false);
@@ -62,7 +61,6 @@ export default function RepositoryPage() {
     const fetchFiles = useCallback(async (repoId: number) => {
         const token = getToken();
         if (!token) return;
-        setIsLoading(true);
         try {
             const response = await fetch(`${API_BASE}/repo/${repoId}/files`, {
                 headers: { Authorization: `Bearer ${token}` },
@@ -72,10 +70,8 @@ export default function RepositoryPage() {
                 const fileTree = buildFileTree(data.files || []);
                 setFiles(fileTree);
             }
-        } catch (err) {
+        } catch {
             setError('Failed to load repository files');
-        } finally {
-            setIsLoading(false);
         }
     }, []);
 
@@ -126,7 +122,7 @@ export default function RepositoryPage() {
                 const data = await response.json();
                 setFileContent(data.content || '');
             }
-        } catch (err) {
+        } catch {
             setError('Failed to load file');
         }
     };
@@ -164,7 +160,7 @@ export default function RepositoryPage() {
             } else {
                 setError('Search failed');
             }
-        } catch (err) {
+        } catch {
             setError('Search failed');
         } finally {
             setIsSearching(false);
@@ -291,7 +287,7 @@ export default function RepositoryPage() {
                                                 const err = await res.json().catch(() => ({}));
                                                 setError(err.detail || 'Failed to create workspace');
                                             }
-                                        } catch (err) {
+                                        } catch {
                                             setError('Failed to create workspace');
                                         }
                                     }}
@@ -320,7 +316,7 @@ export default function RepositoryPage() {
                                             } else {
                                                 setError('Failed to start re-indexing');
                                             }
-                                        } catch (err) {
+                                        } catch {
                                             setError('Failed to start re-indexing');
                                         }
                                     }}
@@ -365,7 +361,7 @@ export default function RepositoryPage() {
                                             } else {
                                                 setError('Failed to delete repository');
                                             }
-                                        } catch (err) {
+                                        } catch {
                                             setError('Failed to delete repository');
                                         }
                                     }}

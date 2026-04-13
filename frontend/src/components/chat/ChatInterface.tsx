@@ -126,7 +126,6 @@ export default function ChatInterface() {
             }
         })();
         return () => { cancelled = true; };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchParams]);
 
     // Fetch user repositories
@@ -197,8 +196,7 @@ export default function ChatInterface() {
                 });
         }, 100);
         return () => clearTimeout(timeoutId);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [router, searchParams]);
 
     // ── Bug 2 Fix: Extract file text instead of uploading to DB ──
     const handleFileAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {

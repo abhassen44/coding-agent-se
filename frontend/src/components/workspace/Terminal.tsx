@@ -1,6 +1,8 @@
-'use client';
+"use client";
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from "react";
+import type { Terminal as XTerm } from "@xterm/xterm";
+import type { FitAddon } from "@xterm/addon-fit";
 
 interface WorkspaceTerminalProps {
     workspaceId: number;
@@ -9,25 +11,22 @@ interface WorkspaceTerminalProps {
 
 export const WorkspaceTerminal: React.FC<WorkspaceTerminalProps> = ({ workspaceId, isVisible }) => {
     const terminalRef = useRef<HTMLDivElement>(null);
-    const xtermRef = useRef<any>(null);
+    const xtermRef = useRef<XTerm | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
-    const fitAddonRef = useRef<any>(null);
-    const connectingRef = useRef(false); // guard against double-connect
+    const fitAddonRef = useRef<FitAddon | null>(null);
+    const connectingRef = useRef(false);
 
     useEffect(() => {
         if (!isVisible || !terminalRef.current) return;
-
-        // Prevent duplicate connections (React strict mode, re-renders, etc.)
         if (connectingRef.current || xtermRef.current) return;
-        connectingRef.current = true;
 
+        connectingRef.current = true;
         let cancelled = false;
 
         const init = async () => {
-            const { Terminal } = await import('@xterm/xterm');
-            const { FitAddon } = await import('@xterm/addon-fit');
-            // @ts-ignore - CSS module import
-            await import('@xterm/xterm/css/xterm.css');
+            const { Terminal } = await import("@xterm/xterm");
+            const { FitAddon } = await import("@xterm/addon-fit");
+            await import("@xterm/xterm/css/xterm.css");
 
             if (cancelled || !terminalRef.current) return;
 
@@ -36,27 +35,27 @@ export const WorkspaceTerminal: React.FC<WorkspaceTerminalProps> = ({ workspaceI
                 fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
                 fontSize: 14,
                 theme: {
-                    background: '#0B0F0E',
-                    foreground: '#E6F1EC',
-                    cursor: '#2EFF7B',
-                    cursorAccent: '#0B0F0E',
-                    selectionBackground: '#2EFF7B33',
-                    black: '#0B0F0E',
-                    red: '#FF5555',
-                    green: '#2EFF7B',
-                    yellow: '#E6CD69',
-                    blue: '#69B4E6',
-                    magenta: '#BD93F9',
-                    cyan: '#69E6E6',
-                    white: '#E6F1EC',
-                    brightBlack: '#5A7268',
-                    brightRed: '#FF6E67',
-                    brightGreen: '#5AF78E',
-                    brightYellow: '#F4F99D',
-                    brightBlue: '#CAA9FA',
-                    brightMagenta: '#FF92D0',
-                    brightCyan: '#9AEDFE',
-                    brightWhite: '#FFFFFF',
+                    background: "#0B0F0E",
+                    foreground: "#E6F1EC",
+                    cursor: "#2EFF7B",
+                    cursorAccent: "#0B0F0E",
+                    selectionBackground: "#2EFF7B33",
+                    black: "#0B0F0E",
+                    red: "#FF5555",
+                    green: "#2EFF7B",
+                    yellow: "#E6CD69",
+                    blue: "#69B4E6",
+                    magenta: "#7EE5FF",
+                    cyan: "#69E6E6",
+                    white: "#E6F1EC",
+                    brightBlack: "#5A7268",
+                    brightRed: "#FF6E67",
+                    brightGreen: "#5AF78E",
+                    brightYellow: "#F4F99D",
+                    brightBlue: "#CAA9FA",
+                    brightMagenta: "#A9F0FF",
+                    brightCyan: "#9AEDFE",
+                    brightWhite: "#FFFFFF",
                 },
                 scrollback: 5000,
                 allowProposedApi: true,
@@ -65,24 +64,23 @@ export const WorkspaceTerminal: React.FC<WorkspaceTerminalProps> = ({ workspaceI
             const fitAddon = new FitAddon();
             term.loadAddon(fitAddon);
             term.open(terminalRef.current);
-            setTimeout(() => fitAddon.fit(), 100);
+            window.setTimeout(() => fitAddon.fit(), 100);
 
             xtermRef.current = term;
             fitAddonRef.current = fitAddon;
 
-            // Connect WebSocket
-            const token = localStorage.getItem('auth_token');
+            const token = window.localStorage.getItem("auth_token");
             if (!token) {
-                term.writeln('\r\n\x1b[31m❌ Not authenticated. Please log in.\x1b[0m\r\n');
+                term.writeln("\r\nNot authenticated. Please log in.\r\n");
                 return;
             }
 
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
             const wsHost = process.env.NEXT_PUBLIC_WS_URL || `${wsProtocol}//localhost:8000`;
             const wsUrl = `${wsHost}/api/v1/terminal/${workspaceId}?token=${token}`;
-
             const ws = new WebSocket(wsUrl);
-            ws.binaryType = 'arraybuffer';
+
+            ws.binaryType = "arraybuffer";
             wsRef.current = ws;
 
             ws.onopen = () => {
@@ -93,24 +91,23 @@ export const WorkspaceTerminal: React.FC<WorkspaceTerminalProps> = ({ workspaceI
             ws.onmessage = (event) => {
                 if (event.data instanceof ArrayBuffer) {
                     term.write(new Uint8Array(event.data));
-                } else {
-                    term.write(event.data);
+                    return;
                 }
+                term.write(event.data);
             };
 
             ws.onclose = (event) => {
                 if (!cancelled) {
-                    term.writeln(`\r\n\x1b[2m🔌 Terminal disconnected (${event.code})\x1b[0m`);
+                    term.writeln(`\r\nTerminal disconnected (${event.code})`);
                 }
             };
 
             ws.onerror = () => {
                 if (!cancelled) {
-                    term.writeln('\r\n\x1b[31m❌ WebSocket error\x1b[0m');
+                    term.writeln("\r\nWebSocket error");
                 }
             };
 
-            // Send keystrokes to container
             term.onData((data: string) => {
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send(new TextEncoder().encode(data));
@@ -120,7 +117,6 @@ export const WorkspaceTerminal: React.FC<WorkspaceTerminalProps> = ({ workspaceI
 
         init();
 
-        // Cleanup on unmount or when deps change
         return () => {
             cancelled = true;
             connectingRef.current = false;
@@ -129,14 +125,14 @@ export const WorkspaceTerminal: React.FC<WorkspaceTerminalProps> = ({ workspaceI
                 wsRef.current.close();
                 wsRef.current = null;
             }
+
             if (xtermRef.current) {
                 xtermRef.current.dispose();
                 xtermRef.current = null;
             }
         };
-    }, [workspaceId, isVisible]);
+    }, [isVisible, workspaceId]);
 
-    // Resize on visibility change / window resize / container resize
     useEffect(() => {
         if (!isVisible || !fitAddonRef.current) return;
 
@@ -144,26 +140,22 @@ export const WorkspaceTerminal: React.FC<WorkspaceTerminalProps> = ({ workspaceI
             try {
                 fitAddonRef.current?.fit();
             } catch {
-                // Ignore fit errors during transitions
+                // Ignore fit errors during resize transitions.
             }
         };
 
-        // Fit when becoming visible or container resizes
-        const timer = setTimeout(handleResize, 50);
-        window.addEventListener('resize', handleResize);
+        const timer = window.setTimeout(handleResize, 50);
+        window.addEventListener("resize", handleResize);
 
-        // Use ResizeObserver to re-fit when the terminal container is resized (drag handle)
         let observer: ResizeObserver | null = null;
         if (terminalRef.current) {
-            observer = new ResizeObserver(() => {
-                handleResize();
-            });
+            observer = new ResizeObserver(() => handleResize());
             observer.observe(terminalRef.current);
         }
 
         return () => {
-            clearTimeout(timer);
-            window.removeEventListener('resize', handleResize);
+            window.clearTimeout(timer);
+            window.removeEventListener("resize", handleResize);
             observer?.disconnect();
         };
     }, [isVisible]);
@@ -171,11 +163,11 @@ export const WorkspaceTerminal: React.FC<WorkspaceTerminalProps> = ({ workspaceI
     return (
         <div
             ref={terminalRef}
-            className="w-full h-full"
+            className="h-full w-full"
             style={{
-                display: isVisible ? 'block' : 'none',
-                padding: '4px',
-                backgroundColor: '#0B0F0E',
+                display: isVisible ? "block" : "none",
+                padding: "4px",
+                backgroundColor: "#0B0F0E",
             }}
         />
     );

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { setStoredAuthTokens } from '@/lib/auth';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
@@ -46,8 +47,10 @@ export default function RegisterPage() {
 
                 if (loginResponse.ok) {
                     const data = await loginResponse.json();
-                    localStorage.setItem('auth_token', data.access_token);
-                    localStorage.setItem('refresh_token', data.refresh_token);
+                    setStoredAuthTokens({
+                        accessToken: data.access_token,
+                        refreshToken: data.refresh_token,
+                    });
                     router.push('/chat');
                 } else {
                     router.push('/login');
@@ -56,7 +59,7 @@ export default function RegisterPage() {
                 const errorData = await registerResponse.json();
                 setError(errorData.detail || 'Registration failed');
             }
-        } catch (err) {
+        } catch {
             setError('Network error. Please try again.');
         } finally {
             setIsLoading(false);
