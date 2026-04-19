@@ -34,9 +34,11 @@ def create_access_token(
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
     
-    to_encode = {"exp": expire, "sub": str(subject), "type": "access"}
+    to_encode = {}
     if additional_claims:
         to_encode.update(additional_claims)
+    # Core fields set AFTER additional_claims to prevent overwrite
+    to_encode.update({"exp": expire, "sub": str(subject), "type": "access"})
     
     encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
     return encoded_jwt

@@ -16,7 +16,7 @@ Internal knowledge used:
   - bcrypt encodes input as UTF-8 before hashing
   - JWT payload always has keys: "exp", "sub", "type"
   - access tokens get type="access"; refresh tokens get type="refresh"
-  - additional_claims are merged via dict.update() (can overwrite core fields)
+  - additional_claims are merged BEFORE core fields, so core fields cannot be overwritten (BUG-002 fix)
   - decode_token() returns None on ANY JWTError (including expiry)
   - SECRET_KEY and ALGORITHM come from settings singleton
 """
@@ -165,12 +165,12 @@ class TestCreateAccessToken:
         expected_exp = before + (settings.access_token_expire_minutes * 60)
         assert abs(payload["exp"] - expected_exp) < 10
 
-    def test_wb_sec_17_additional_claims_can_overwrite_type(self):
-        """WB-SEC-17: dict.update() allows overwriting 'type' — expose footgun."""
+    def test_wb_sec_17_additional_claims_cannot_overwrite_type(self):
+        """WB-SEC-17: core fields are set AFTER additional_claims — overwrite blocked (BUG-002 fix)."""
         token = create_access_token(subject=1, additional_claims={"type": "superuser"})
         payload = self._decode(token)
-        # This is a known risk: additional_claims can stomp core fields
-        assert payload["type"] == "superuser"
+        # After fix: core fields are immutable; 'type' stays 'access'
+        assert payload["type"] == "access"
 
     def test_wb_sec_18_algorithm_used_is_hs256(self):
         """WB-SEC-18: token must be decodable with HS256 only."""
