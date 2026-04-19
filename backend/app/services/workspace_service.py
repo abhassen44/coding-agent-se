@@ -64,10 +64,11 @@ class WorkspaceService:
             repo_url = repo.url
             name = name or repo.name
 
-        if not repo_url:
+        if not repo_url and not repo_id:
             raise ValueError("Either repo_url or repo_id must be provided")
 
-        name = name or repo_url.rstrip("/").rsplit("/", 1)[-1].replace(".git", "")
+        if not name:
+            name = repo_url.rstrip("/").rsplit("/", 1)[-1].replace(".git", "") if repo_url else f"workspace_{repo_id}"
         volume_name = f"ica_ws_{user_id}_{name}_{int(datetime.utcnow().timestamp())}"
         base_image = settings.workspace_base_image
 
@@ -99,7 +100,7 @@ class WorkspaceService:
         return workspace
 
     async def _background_setup(
-        self, workspace_id: int, volume_name: str, base_image: str, repo_url: str, name: str
+        self, workspace_id: int, volume_name: str, base_image: str, repo_url: Optional[str], name: str
     ):
         """Runs the blocking Docker setup and updates the DB with a new session."""
         try:
@@ -130,7 +131,7 @@ class WorkspaceService:
                     await db.commit()
 
     def _setup_container(
-        self, volume_name: str, base_image: str, repo_url: str, name: str
+        self, volume_name: str, base_image: str, repo_url: Optional[str], name: str
     ) -> str:
         """Create volume, start container, clone repo. Runs in thread pool."""
         # Ensure image exists
@@ -156,16 +157,19 @@ class WorkspaceService:
             cpu_quota=100000,  # 1 full CPU
         )
 
-        # Clone repo inside container
-        exit_code, output = container.exec_run(
-            f"git clone {repo_url} .",
-            workdir="/workspace",
-        )
-        if exit_code != 0:
-            error_msg = output.decode("utf-8", errors="replace")
-            # If directory not empty (already cloned), that's okay
-            if "already exists and is not an empty directory" not in error_msg:
-                logger.warning(f"Git clone warning: {error_msg}")
+        # Clone repo inside container (skip for local repos with no URL)
+        if repo_url:
+            exit_code, output = container.exec_run(
+                f"git clone {repo_url} .",
+                workdir="/workspace",
+            )
+            if exit_code != 0:
+                error_msg = output.decode("utf-8", errors="replace")
+                # If directory not empty (already cloned), that's okay
+                if "already exists and is not an empty directory" not in error_msg:
+                    logger.warning(f"Git clone warning: {error_msg}")
+        else:
+            logger.info(f"Local repo — skipping git clone for workspace '{name}'")
 
         return container.id
 
