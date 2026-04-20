@@ -825,7 +825,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                         value={input}
                         onChange={(event) => {
                             setInput(event.target.value);
-                            // Auto-grow: reset then measure
+                            // Auto-grow
                             const el = event.target;
                             el.style.height = 'auto';
                             el.style.height = Math.min(el.scrollHeight, 200) + 'px';
@@ -834,7 +834,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                             if (event.key === 'Enter' && !event.shiftKey) {
                                 event.preventDefault();
                                 handleSend();
-                                // Reset height after send
+                                // Reset height
                                 if (inputRef.current) {
                                     inputRef.current.style.height = 'auto';
                                 }
@@ -842,7 +842,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                         }}
                         placeholder="Ask anything ..."
                         rows={1}
-                        className="w-full bg-transparent border-none px-1 py-2 text-sm text-[#E6F1EC] placeholder-[#5A7268] focus:outline-none focus:ring-0 resize-none overflow-y-auto overflow-x-hidden"
+                        className="w-full bg-transparent border-none px-1 py-2 text-sm text-[#E6F1EC] placeholder-[#5A7268] focus:outline-none focus:ring-0 resize-none overflow-y-auto"
                         style={{ maxHeight: '200px', outline: 'none', boxShadow: 'none' }}
                     />
                 </div>
@@ -864,11 +864,11 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                     </button>
 
                     {/* Model selector — inline */}
-                    <div className="relative flex items-center group">
+                    <div className="relative flex items-center group rounded-lg border border-transparent focus-within:border-[#2EFF7B]/30 focus-within:bg-[#1A2420] transition-colors">
                         <select
                             value={provider}
                             onChange={(event) => setProvider(event.target.value as AgentProvider)}
-                            className="h-8 appearance-none bg-transparent py-1 pl-2 pr-6 text-[11px] font-medium text-[#8FDDB3] focus:outline-none focus:ring-0 border-none cursor-pointer"
+                            className="appearance-none bg-transparent py-1.5 pl-2 pr-6 text-[11px] font-medium text-[#8FDDB3] focus:outline-none focus:ring-0 border-none cursor-pointer"
                             style={{ outline: 'none', boxShadow: 'none' }}
                             aria-label="Agent provider"
                         >
@@ -876,7 +876,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
                                 <option key={option.value} value={option.value} style={{ backgroundColor: '#111917', color: '#8FDDB3' }}>{option.label}</option>
                             ))}
                         </select>
-                        <ChevronDown className="pointer-events-none absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#5A7268] group-hover:text-[#8FDDB3] transition-colors" />
+                        <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#5A7268] group-hover:text-[#8FDDB3] transition-colors" />
                     </div>
 
                     {/* Spacer */}
