@@ -462,12 +462,22 @@ export default function ChatInterface() {
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Input */}
-            <div className="shrink-0 p-4 border-t border-[#1F2D28] bg-[#111917]">
-                <div className="flex flex-col bg-[#1A2420] border border-[#1F2D28] rounded-2xl p-2 shadow-sm focus-within:border-[#2EFF7B]/50 transition-colors">
-                    {/* Attached Files Preview */}
+            {/* Input — Antigravity-style bottom bar */}
+            <div className="shrink-0 border-t border-[#1F2D28] bg-[#111917]">
+                <form onSubmit={handleSubmit} className="flex flex-col">
+                    {/* Hidden file input */}
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        onChange={handleFileAttach}
+                        className="hidden"
+                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.bmp,.txt,.md,.py,.js,.ts,.tsx,.jsx,.java,.cpp,.c,.go,.rs,.json,.yaml,.yml,.sql,.sh,.csv,.xml,.html,.css"
+                    />
+
+                    {/* Attached files row */}
                     {attachedFiles.length > 0 && (
-                        <div className="mb-2 flex flex-wrap gap-2 px-2 pt-1">
+                        <div className="flex flex-wrap gap-2 px-4 pt-3 pb-1">
                             {attachedFiles.map((file, idx) => (
                                 <span
                                     key={idx}
@@ -477,7 +487,7 @@ export default function ChatInterface() {
                                             ? "bg-[#2EFF7B]/10 text-[#2EFF7B] border-[#2EFF7B]/30"
                                             : file.status === "error"
                                                 ? "bg-red-500/10 text-red-400 border-red-500/30"
-                                                : "bg-[#1A2420] text-[#8FAEA2] border-[#1F2D28] animate-pulse"
+                                                : "bg-[#111917] text-[#8FAEA2] border-[#1F2D28] animate-pulse"
                                     }`}
                                 >
                                     {file.status === "extracting" ? "⏳" : file.status === "ready" ? (
@@ -488,8 +498,9 @@ export default function ChatInterface() {
                                     <span className="max-w-[120px] truncate">{file.name}</span>
                                     {file.status !== "extracting" && (
                                         <button
+                                            type="button"
                                             onClick={() => removeAttachedFile(file.name)}
-                                            className="ml-1 opacity-60 hover:opacity-100"
+                                            className="ml-1 opacity-60 hover:opacity-100 mt-0.5"
                                         >×</button>
                                     )}
                                 </span>
@@ -497,73 +508,87 @@ export default function ChatInterface() {
                         </div>
                     )}
 
-                    <form onSubmit={handleSubmit} className="flex flex-col">
+                    {/* Textarea — auto-growing, flat */}
+                    <div className="px-4 pt-3 pb-1">
                         <textarea
                             ref={inputRef}
                             value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            onKeyDown={handleKeyDown}
+                            onChange={(e) => {
+                                setInput(e.target.value);
+                                const el = e.target;
+                                el.style.height = 'auto';
+                                el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    const formEvent = e as unknown as React.FormEvent;
+                                    handleSubmit(formEvent);
+                                    if (inputRef.current) {
+                                        inputRef.current.style.height = 'auto';
+                                    }
+                                }
+                            }}
                             placeholder="Ask me anything about code..."
                             rows={1}
-                            className="w-full bg-transparent px-3 py-2 text-sm text-[#E6F1EC] placeholder-[#5A7268] focus:outline-none resize-none"
-                            style={{ maxHeight: "200px" }}
+                            className="w-full bg-transparent border-none px-1 py-2 text-sm text-[#E6F1EC] placeholder-[#5A7268] focus:outline-none focus:ring-0 resize-none overflow-y-auto"
+                            style={{ maxHeight: '200px', outline: 'none', boxShadow: 'none' }}
                         />
-                        <div className="flex justify-between items-center px-1 mt-1">
-                            <div className="flex items-center gap-1">
-                                {/* File attachment — extract-text approach */}
-                                <input
-                                    ref={fileInputRef}
-                                    type="file"
-                                    multiple
-                                    onChange={handleFileAttach}
-                                    className="hidden"
-                                    accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.gif,.webp,.bmp,.txt,.md,.py,.js,.ts,.tsx,.jsx,.java,.cpp,.c,.go,.rs,.json,.yaml,.yml,.sql,.sh,.csv,.xml,.html,.css"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="p-2 text-[#5A7268] hover:text-[#8FAEA2] rounded-lg transition-colors"
-                                    title="Attach file (PDF, Word, Image, Code)"
-                                >
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                                    </svg>
-                                </button>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <label className="flex items-center gap-2 cursor-pointer group">
-                                    <div className="relative flex items-center">
-                                        <input type="checkbox" className="sr-only" checked={planMode} onChange={(e) => setPlanMode(e.target.checked)} />
-                                        <div className={`block w-9 h-5 rounded-full transition-colors ${planMode ? "bg-[#2EFF7B]/20" : "bg-[#111917] border border-[#1F2D28]"}`}></div>
-                                        <div className={`absolute left-1 top-1 w-3 h-3 rounded-full transition-transform ${planMode ? "translate-x-4 bg-[#2EFF7B]" : "bg-[#5A7268] group-hover:bg-[#8FAEA2]"}`}></div>
-                                    </div>
-                                    <span className={`text-xs transition-colors ${planMode ? "text-[#2EFF7B]" : "text-[#5A7268] group-hover:text-[#8FAEA2]"}`}>Plan</span>
-                                </label>
+                    </div>
 
-                                <button
-                                    type="button"
-                                    className="p-1.5 text-[#5A7268] hover:text-[#8FAEA2] rounded-lg transition-colors ml-1"
-                                    aria-label="Expand"
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <path d="M15 3h6v6" /><path d="M9 21H3v-6" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" />
-                                    </svg>
-                                </button>
+                    {/* Controls row — below input */}
+                    <div className="flex items-center gap-2 px-4 py-2.5">
+                        {/* + Attach button */}
+                        <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="flex h-8 w-8 items-center justify-center rounded-lg text-[#5A7268] hover:bg-[#1A2420] hover:text-[#8FAEA2] transition-colors"
+                            aria-label="Add attachment"
+                            title="Attachments"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                        </button>
 
-                                <button
-                                    type="submit"
-                                    disabled={!input.trim() || isLoading || attachedFiles.some(f => f.status === "extracting")}
-                                    className="p-2 ml-1 bg-[#2EFF7B] text-[#0B0F0E] rounded-lg hover:bg-[#1ED760] disabled:opacity-50 disabled:bg-[#1A2420] disabled:text-[#5A7268] transition-colors"
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                        <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
-                                    </svg>
-                                </button>
+                        {/* Plan mode toggle */}
+                        <label className="flex items-center gap-2 cursor-pointer group ml-1">
+                            <div className="relative flex items-center">
+                                <input type="checkbox" className="sr-only" checked={planMode} onChange={(e) => setPlanMode(e.target.checked)} />
+                                <div className={`block w-8 h-4 rounded-full transition-colors ${planMode ? "bg-[#2EFF7B]/20" : "bg-[#1A2420] border border-[#244235]"}`}></div>
+                                <div className={`absolute left-0.5 top-0.5 w-3 h-3 rounded-full transition-transform ${planMode ? "translate-x-4 bg-[#2EFF7B]" : "bg-[#5A7268] group-hover:bg-[#8FAEA2]"}`}></div>
                             </div>
-                        </div>
-                    </form>
-                </div>
-                <div className="text-center mt-2 pointer-events-auto">
+                            <span className={`text-[11px] font-medium transition-colors ${planMode ? "text-[#2EFF7B]" : "text-[#5A7268] group-hover:text-[#8FAEA2]"}`}>Plan</span>
+                        </label>
+
+                        {/* Spacer */}
+                        <div className="flex-1" />
+
+                        {/* Expand Button */}
+                        <button
+                            type="button"
+                            className="p-1.5 text-[#5A7268] hover:text-[#8FAEA2] hover:bg-[#1A2420] rounded-lg transition-colors ml-1"
+                            aria-label="Expand"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M15 3h6v6" /><path d="M9 21H3v-6" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" />
+                            </svg>
+                        </button>
+
+                        {/* Send Button — Circular */}
+                        <button
+                            type="submit"
+                            disabled={!input.trim() || isLoading || attachedFiles.some(f => f.status === "extracting")}
+                            className="flex h-9 w-9 items-center justify-center bg-[#2EFF7B] text-[#0B0F0E] rounded-full hover:bg-[#1ED760] disabled:opacity-40 disabled:bg-[#1A2420] disabled:text-[#5A7268] transition-all ml-1"
+                        >
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" />
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+                <div className="text-center pb-2 pointer-events-auto">
                     <span className="text-[10px] text-[#5A7268]">ICA may produce inaccurate information.</span>
                 </div>
             </div>
