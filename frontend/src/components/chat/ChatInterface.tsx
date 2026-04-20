@@ -300,8 +300,8 @@ export default function ChatInterface() {
                 fileContext = readyFiles.map(f => {
                     const typeLabel =
                         f.fileType === "pdf" ? "📄 PDF" :
-                        f.fileType === "word" ? "📝 Word Doc" :
-                        f.fileType === "image" ? "🖼️ Image" : "📄 File";
+                            f.fileType === "word" ? "📝 Word Doc" :
+                                f.fileType === "image" ? "🖼️ Image" : "📄 File";
                     return `=== Attached ${typeLabel}: ${f.name} ===\n${f.text}\n=== End of ${f.name} ===`;
                 }).join("\n\n");
             }
@@ -406,15 +406,14 @@ export default function ChatInterface() {
                         <select
                             value={provider}
                             onChange={(e) => setProvider(e.target.value as typeof provider)}
-                            className={`appearance-none cursor-pointer px-3 py-1.5 pr-7 rounded-lg text-xs font-medium transition-all duration-200 border focus:outline-none ${
-                                provider === "gemini"
+                            className={`appearance-none cursor-pointer px-3 py-1.5 pr-7 rounded-lg text-xs font-medium transition-all duration-200 border focus:outline-none ${provider === "gemini"
                                     ? "bg-[#2EFF7B]/10 text-[#2EFF7B] border-[#2EFF7B]/30 hover:bg-[#2EFF7B]/20"
                                     : provider === "gemma4"
                                         ? "bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20"
                                         : provider.endsWith("-cloud")
                                             ? "bg-orange-500/10 text-orange-400 border-orange-500/30 hover:bg-orange-500/20"
                                             : "bg-purple-500/10 text-purple-400 border-purple-500/30 hover:bg-purple-500/20"
-                            }`}
+                                }`}
                             aria-label="AI model"
                         >
                             <option value="gemini">✦ Gemini</option>
@@ -482,18 +481,17 @@ export default function ChatInterface() {
                                 <span
                                     key={idx}
                                     title={file.error || (file.status === "ready" ? `${file.charCount.toLocaleString()} chars extracted${file.truncated ? " (truncated)" : ""}` : "")}
-                                    className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${
-                                        file.status === "ready"
+                                    className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg border ${file.status === "ready"
                                             ? "bg-[#2EFF7B]/10 text-[#2EFF7B] border-[#2EFF7B]/30"
                                             : file.status === "error"
                                                 ? "bg-red-500/10 text-red-400 border-red-500/30"
                                                 : "bg-[#111917] text-[#8FAEA2] border-[#1F2D28] animate-pulse"
-                                    }`}
+                                        }`}
                                 >
                                     {file.status === "extracting" ? "⏳" : file.status === "ready" ? (
                                         file.fileType === "pdf" ? "📄" :
-                                        file.fileType === "word" ? "📝" :
-                                        file.fileType === "image" ? "🖼️" : "📄"
+                                            file.fileType === "word" ? "📝" :
+                                                file.fileType === "image" ? "🖼️" : "📄"
                                     ) : "✕"}
                                     <span className="max-w-[120px] truncate">{file.name}</span>
                                     {file.status !== "extracting" && (
