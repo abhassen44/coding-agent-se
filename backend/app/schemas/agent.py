@@ -16,13 +16,13 @@ class AgentRequest(BaseModel):
         description="Specific file paths to include as context. If None, agent auto-discovers key files.",
     )
     provider: Optional[Literal[
-        "auto", "gemini", "qwen", "qwen-cloud", "gemma4",
+        "auto", "gemini", "qwen", "gemma4",
         "hf-qwen-7b", "hf-qwen-35b",
         "hf-llama-8b", "hf-llama-70b",
-        "gpt-oss-cloud", "kimi-cloud", "minimax-cloud"
+        "gpt-oss-cloud", "minimax-cloud", "deepseek-cloud", "nemotron-cloud"
     ]] = Field(
         default="auto",
-        description="Model selection: auto, gemini, qwen, qwen-cloud, gemma4, or hf-* HuggingFace models.",
+        description="Model selection: auto, gemini, qwen, gemma4, or hf-* HuggingFace models.",
     )
 
 

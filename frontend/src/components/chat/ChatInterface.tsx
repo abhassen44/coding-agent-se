@@ -54,7 +54,7 @@ export default function ChatInterface() {
     const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
     const [showRepoDropdown, setShowRepoDropdown] = useState(false);
     const [planMode, setPlanMode] = useState(false);
-    const [provider, setProvider] = useState<"gemini" | "qwen" | "qwen-cloud" | "gemma4" | "gpt-oss-cloud" | "kimi-cloud" | "minimax-cloud">("qwen-cloud");
+    const [provider, setProvider] = useState<"gemini" | "qwen" | "gemma4" | "gpt-oss-cloud" | "minimax-cloud" | "deepseek-cloud" | "nemotron-cloud">("gemini");
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -417,12 +417,12 @@ export default function ChatInterface() {
                             aria-label="AI model"
                         >
                             <option value="gemini">✦ Gemini</option>
-                            <option value="gemma4">◆ Gemma 4 (Local)</option>
+                            <option value="gemma4">◆ Gemma 4 (Cloud)</option>
                             <option value="qwen">■ Qwen 3.5 (Local)</option>
-                            <option value="qwen-cloud">☁ Qwen 397B (Cloud)</option>
                             <option value="gpt-oss-cloud">☁ GPT-OSS 120B (Cloud)</option>
-                            <option value="kimi-cloud">☁ Kimi k2.5 (Cloud)</option>
-                            <option value="minimax-cloud">☁ MiniMax m2.7 (Cloud)</option>
+                            <option value="minimax-cloud">☁ MiniMax m2.5 (Cloud)</option>
+                            <option value="deepseek-cloud">☁ DeepSeek v4 Flash (Cloud)</option>
+                            <option value="nemotron-cloud">☁ Nemotron 3 Super (Cloud)</option>
                         </select>
                         <svg className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 text-[#5A7268]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />

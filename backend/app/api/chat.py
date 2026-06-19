@@ -38,7 +38,7 @@ async def get_rag_context(
     return context_response.context if context_response.context else None
 
 
-def get_ai_service(provider: str = "qwen-cloud"):
+def get_ai_service(provider: str = "gemini"):
     """Get the appropriate AI service based on provider."""
     if is_ollama_provider(provider):
         return get_ollama_service(provider)
@@ -69,7 +69,7 @@ async def send_message(
     except Exception:
         pass
 
-    ai_service = get_ai_service(request.provider or "qwen-cloud")
+    ai_service = get_ai_service(request.provider or "gemini")
     conv_service = ConversationService(db)
     redis_mem = get_redis_memory()
     ctx_mgr = ContextManager(redis_mem, conv_service)
@@ -128,7 +128,7 @@ async def send_message(
 @router.post("/stream")
 async def stream_message(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     """Stream AI response for a message with optional RAG context."""
-    ai_service = get_ai_service(request.provider or "qwen-cloud")
+    ai_service = get_ai_service(request.provider or "gemini")
     
     # Convert history to dict format
     history = None

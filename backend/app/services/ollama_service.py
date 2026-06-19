@@ -10,11 +10,11 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 # Map frontend provider keys to backend Ollama models
 MODEL_MAPPING = {
     "qwen": "qwen3.5:9b",
-    "qwen-cloud": "qwen3.5:397b-cloud",
-    "gemma4": "gemma4:latest",
+    "gemma4": "gemma4:31b-cloud",
     "gpt-oss-cloud": "gpt-oss:120b-cloud",
-    "kimi-cloud": "kimi-k2.5:cloud",
-    "minimax-cloud": "minimax-m2.7:cloud",
+    "minimax-cloud": "minimax-m2.5:cloud",
+    "deepseek-cloud": "deepseek-v4-flash:cloud",
+    "nemotron-cloud": "nemotron-3-super:cloud",
 }
 
 class OllamaService:

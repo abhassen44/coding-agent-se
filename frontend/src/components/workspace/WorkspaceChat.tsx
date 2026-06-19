@@ -69,11 +69,11 @@ const PROVIDER_OPTIONS: Array<{ value: AgentProvider; label: string }> = [
     { value: 'auto', label: 'Auto' },
     { value: 'gemini', label: 'Gemini' },
     { value: 'qwen', label: 'Qwen 3.5 (Local)' },
-    { value: 'qwen-cloud', label: 'Qwen 397B (Cloud)' },
-    { value: 'gemma4', label: 'Gemma 4 (Local)' },
+    { value: 'gemma4', label: 'Gemma 4 (Cloud)' },
     { value: 'gpt-oss-cloud', label: 'GPT-OSS 120B (Cloud)' },
-    { value: 'kimi-cloud', label: 'Kimi k2.5 (Cloud)' },
-    { value: 'minimax-cloud', label: 'MiniMax m2.7 (Cloud)' },
+    { value: 'minimax-cloud', label: 'MiniMax m2.5 (Cloud)' },
+    { value: 'deepseek-cloud', label: 'DeepSeek v4 Flash (Cloud)' },
+    { value: 'nemotron-cloud', label: 'Nemotron 3 Super (Cloud)' },
     { value: 'hf-qwen-7b', label: 'HF Qwen 7B' },
     { value: 'hf-qwen-35b', label: 'HF Qwen 35B' },
     { value: 'hf-llama-8b', label: 'HF Llama 8B' },
@@ -100,7 +100,7 @@ export const WorkspaceChat: React.FC<WorkspaceChatProps> = ({
     const [historyError, setHistoryError] = useState<string | null>(null);
     const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
 
-    const [provider, setProvider] = useState<AgentProvider>('qwen-cloud');
+    const [provider, setProvider] = useState<AgentProvider>('gemini');
     const isStreamingRef = useRef(false);
     const abortControllerRef = useRef<AbortController | null>(null);
     const streamingContentRef = useRef('');
