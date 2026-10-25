@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from "react";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
+import { apiClient } from "@/lib/api";
 
 interface WorkspaceTerminalProps {
     workspaceId: number;
@@ -69,15 +70,19 @@ export const WorkspaceTerminal: React.FC<WorkspaceTerminalProps> = ({ workspaceI
             xtermRef.current = term;
             fitAddonRef.current = fitAddon;
 
-            const token = window.localStorage.getItem("auth_token");
-            if (!token) {
-                term.writeln("\r\nNot authenticated. Please log in.\r\n");
+            const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+            const wsHost = process.env.NEXT_PUBLIC_WS_URL || `${wsProtocol}//localhost:8000`;
+
+            let ticket: string;
+            try {
+                const response = await apiClient.createTerminalTicket(workspaceId);
+                ticket = response.ticket;
+            } catch {
+                term.writeln("\r\nCould not authenticate the terminal session.\r\n");
                 return;
             }
 
-            const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-            const wsHost = process.env.NEXT_PUBLIC_WS_URL || `${wsProtocol}//localhost:8000`;
-            const wsUrl = `${wsHost}/api/v1/terminal/${workspaceId}?token=${token}`;
+            const wsUrl = `${wsHost}/api/v1/terminal/${workspaceId}?ticket=${encodeURIComponent(ticket)}`;
             const ws = new WebSocket(wsUrl);
 
             ws.binaryType = "arraybuffer";

@@ -20,6 +20,7 @@ import {
     X,
 } from "lucide-react";
 import { clearStoredAuth, useIsLoggedIn } from "@/lib/auth";
+import { apiClient } from "@/lib/api";
 
 interface Suggestion {
     type: "recent" | "page" | "repo";
@@ -35,7 +36,6 @@ interface RepoSuggestion {
     name: string;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 const RECENT_SEARCHES_KEY = "recent_searches";
 
 const PAGES = [
@@ -72,20 +72,16 @@ export default function TopNav() {
     useEffect(() => {
         if (!isLoggedIn) return;
 
-        const token = window.localStorage.getItem("auth_token");
-        if (!token) return;
-
-        fetch(`${API_BASE}/repo`, { headers: { Authorization: `Bearer ${token}` } })
-            .then(async (response) => {
-                if (!response.ok) return null;
-                return response.json() as Promise<{ repositories?: RepoSuggestion[] }>;
-            })
+        let cancelled = false;
+        apiClient.listRepositories()
             .then((data) => {
-                if (data?.repositories) {
-                    setRepos(data.repositories);
-                }
+                if (!cancelled) setRepos(data.repositories || []);
             })
             .catch(() => undefined);
+
+        return () => {
+            cancelled = true;
+        };
     }, [isLoggedIn]);
 
     useEffect(() => {

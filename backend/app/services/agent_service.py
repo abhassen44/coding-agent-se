@@ -9,12 +9,17 @@ Mirrors the Antigravity agent architecture:
   - Step-by-step tool usage tracking for the frontend
 """
 import re
+import shlex
+import socket
+import asyncio
 import subprocess
 import logging
 import os
+from contextlib import suppress
 from typing import Optional, List, Annotated, TypedDict, AsyncGenerator, Dict, Any
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 import difflib
 
 from dotenv import load_dotenv
@@ -31,10 +36,12 @@ from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+from app.core.config import get_settings
 from app.services.workspace_service import WorkspaceService
 from app.schemas.agent import AgentAction, AgentResponse, AgentApplyResult
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 # ── Token threshold for model routing ────────────────────────────
 GEMINI_TOKEN_THRESHOLD = 1500
@@ -131,22 +138,40 @@ def _get_container_id(workspace_service, workspace_id, user_id):
 
 
 def create_workspace_tools(workspace_service: WorkspaceService, workspace_id: int, user_id: int):
-    """Create 8 tool functions bound to a specific workspace — mirrors Antigravity's toolset."""
+    """Create the 16 workspace tools bound to a specific workspace."""
 
     # ── Helper: run a command in the container ──
     async def _exec_in_container(command: str, timeout: int = 60) -> str:
-        """Execute a command inside the workspace container."""
+        """Execute a command inside the workspace container without blocking the loop."""
         workspace = await workspace_service.get_workspace(workspace_id, user_id)
         if not workspace or not workspace.container_id:
             return "[Error: workspace not running]"
-        proc = subprocess.run(
-            ["docker", "exec", workspace.container_id, "/bin/bash", "-c", command],
-            capture_output=True, text=True, timeout=timeout,
+
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "exec",
+            workspace.container_id,
+            "/bin/sh",
+            "-c",
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        output = proc.stdout
-        if proc.stderr:
-            output += f"\nSTDERR:\n{proc.stderr}"
-        if proc.returncode != 0:
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            with suppress(ProcessLookupError):
+                proc.kill()
+            await proc.wait()
+            return f"[Command timed out after {timeout}s]"
+
+        output = stdout_b.decode("utf-8", errors="replace")
+        stderr = stderr_b.decode("utf-8", errors="replace")
+        if stderr:
+            output += f"\nSTDERR:\n{stderr}"
+        if proc.returncode:
             output += f"\n[Exit code: {proc.returncode}]"
         return output.strip() or "(no output)"
 
@@ -209,9 +234,25 @@ def create_workspace_tools(workspace_service: WorkspaceService, workspace_id: in
         Returns matching lines with file paths and line numbers. Use this to find 
         function definitions, imports, variable usage, etc."""
         try:
-            # Use grep -rn for recursive search with line numbers
-            cmd = f"grep -rn --include='*.py' --include='*.js' --include='*.ts' --include='*.tsx' --include='*.jsx' --include='*.java' --include='*.go' --include='*.rs' --include='*.c' --include='*.cpp' --include='*.h' --include='*.html' --include='*.css' --include='*.json' --include='*.yaml' --include='*.yml' --include='*.md' --include='*.txt' --include='*.sh' --include='*.sql' --include='*.rb' --include='*.php' -l 50 '{pattern}' /workspace/{path} 2>/dev/null | head -50"
+            # Use grep -rn for recursive search with line numbers.
+            # -m 50 caps matches per file; -e protects patterns starting with '-'.
+            includes = " ".join(
+                f"--include={shlex.quote(ext)}"
+                for ext in (
+                    "*.py", "*.js", "*.ts", "*.tsx", "*.jsx", "*.java", "*.go",
+                    "*.rs", "*.c", "*.cpp", "*.h", "*.html", "*.css", "*.json",
+                    "*.yaml", "*.yml", "*.md", "*.txt", "*.sh", "*.sql", "*.rb",
+                    "*.php",
+                )
+            )
+            safe_path = shlex.quote(f"/workspace/{path.strip('/') or '.'}")
+            pattern = shlex.quote(pattern)
+            cmd = (
+                f"grep -rn -m 50 {includes} -e {pattern} {safe_path} "
+                "2>/dev/null | head -50"
+            )
             result = await _exec_in_container(cmd)
+            result = result.replace("[Exit code: 1]", "").strip()
             if not result or result == "(no output)":
                 return f"No matches found for '{pattern}' in '{path}'"
             matches = result.strip().split('\n')
@@ -229,7 +270,12 @@ def create_workspace_tools(workspace_service: WorkspaceService, workspace_id: in
         """Find files by name pattern (like find). Supports glob patterns like '*.py', 'test_*', 'README*'.
         Use this to locate specific files in the project."""
         try:
-            cmd = f"find /workspace -name '{pattern}' -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/__pycache__/*' -not -path '*/.next/*' 2>/dev/null | head -30"
+            cmd = (
+                f"find /workspace -name {shlex.quote(pattern)} "
+                "-not -path '*/node_modules/*' -not -path '*/.git/*' "
+                "-not -path '*/__pycache__/*' -not -path '*/.next/*' "
+                "2>/dev/null | head -30"
+            )
             result = await _exec_in_container(cmd)
             if not result or result == "(no output)":
                 return f"No files found matching '{pattern}'"
@@ -297,8 +343,8 @@ def create_workspace_tools(workspace_service: WorkspaceService, workspace_id: in
         try:
             file_data = await workspace_service.read_file(workspace_id, user_id, path)
             old_content = file_data.get("content", "")
-            if old_content and not old_content.endswith('\\n'):
-                old_content += '\\n'
+            if old_content and not old_content.endswith("\n"):
+                old_content += "\n"
             new_content = old_content + content
             await workspace_service.write_file(workspace_id, user_id, path, new_content)
             return f"✅ Successfully appended to '{path}'"
@@ -309,13 +355,18 @@ def create_workspace_tools(workspace_service: WorkspaceService, workspace_id: in
     @tool
     async def move_file(from_path: str, to_path: str) -> str:
         """Move or rename a file or directory."""
-        return await _exec_in_container(f"mv '/workspace/{from_path}' '/workspace/{to_path}'")
+        return await _exec_in_container(
+            f"mv {shlex.quote('/workspace/' + from_path)} "
+            f"{shlex.quote('/workspace/' + to_path)}"
+        )
 
     # ── Tool 12: Make Directory ──
     @tool
     async def make_directory(path: str) -> str:
         """Create a directory, including all necessary parent directories."""
-        return await _exec_in_container(f"mkdir -p '/workspace/{path}'")
+        return await _exec_in_container(
+            f"mkdir -p {shlex.quote('/workspace/' + path)}"
+        )
 
     # ── Tool 13: Get Git Status ──
     @tool
@@ -329,12 +380,18 @@ def create_workspace_tools(workspace_service: WorkspaceService, workspace_id: in
         """Install dependencies. 'manager' should be 'npm', 'pip', 'yarn', 'pnpm', or 'apt'. 'packages' is space-separated."""
         if manager not in ['npm', 'pip', 'yarn', 'pnpm', 'apt', 'apt-get']:
             return f"[Error: unsupported package manager '{manager}']"
+        try:
+            package_args = " ".join(shlex.quote(p) for p in shlex.split(packages))
+        except ValueError as e:
+            return f"[Error: invalid package list: {e}]"
+        if not package_args:
+            return "[Error: no packages specified]"
         cmd = ""
-        if manager == "npm": cmd = f"npm install {packages}"
-        elif manager == "yarn": cmd = f"yarn add {packages}"
-        elif manager == "pnpm": cmd = f"pnpm install {packages}"
-        elif manager == "pip": cmd = f"pip install {packages}"
-        elif manager in ["apt", "apt-get"]: cmd = f"apt-get update && apt-get install -y {packages}"
+        if manager == "npm": cmd = f"npm install {package_args}"
+        elif manager == "yarn": cmd = f"yarn add {package_args}"
+        elif manager == "pnpm": cmd = f"pnpm install {package_args}"
+        elif manager == "pip": cmd = f"pip install {package_args}"
+        elif manager in ["apt", "apt-get"]: cmd = f"apt-get update && apt-get install -y {package_args}"
         return await _exec_in_container(cmd)
 
     # ── Tool 15: Run Tests ──
@@ -367,7 +424,7 @@ def create_workspace_tools(workspace_service: WorkspaceService, workspace_id: in
 # ── LangGraph Agent Service ──────────────────────────────────────
 
 class AgentService:
-    """LangGraph-based iterative AI agent for workspace operations."""
+    """Iterative AI agent for workspace operations (16 tools)."""
 
     MAX_ITERATIONS = 30  # Safety limit (raised from 20 — more tools = more iterations)
 
@@ -377,6 +434,18 @@ class AgentService:
 
     def _estimate_tokens(self, text: str) -> int:
         return len(text) // 4
+
+    @staticmethod
+    def _ollama_reachable(timeout: float = 0.75) -> bool:
+        """Best-effort reachability check before routing to Ollama."""
+        parsed = urlparse(settings.ollama_base_url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 11434
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                return True
+        except OSError:
+            return False
 
     def _get_llm(self, provider: str = "auto", context_size: int = 0):
         """Get the appropriate LangChain LLM based on provider selection."""
@@ -428,11 +497,17 @@ class AgentService:
         from app.services.ollama_service import is_ollama_provider, get_ollama_langchain_model
         
         if is_ollama_provider(effective_provider):
-            try:
-                model = get_ollama_langchain_model(effective_provider, context_size)
-                return model, effective_provider
-            except Exception as e:
-                logger.warning(f"Ollama provider '{effective_provider}' unavailable: {e}, falling back to Gemini")
+            if not self._ollama_reachable():
+                logger.warning(
+                    "Ollama at %s is unreachable; falling back to Gemini",
+                    settings.ollama_base_url,
+                )
+            else:
+                try:
+                    model = get_ollama_langchain_model(effective_provider, context_size)
+                    return model, effective_provider
+                except Exception as e:
+                    logger.warning(f"Ollama provider '{effective_provider}' unavailable: {e}, falling back to Gemini")
 
         # ── Gemini (fallback/default) ──
         try:
@@ -440,7 +515,7 @@ class AgentService:
             api_key = os.getenv("GEMINI_API_KEY", "")
             logger.info(f"Agent using Gemini (context ~{context_size} tokens)")
             return ChatGoogleGenerativeAI(
-                model="gemini-2.0-flash",
+                model=os.getenv("GEMINI_CHAT_MODEL", "gemini-3-flash-preview"),
                 google_api_key=api_key,
                 temperature=0,
                 max_output_tokens=8192,
@@ -461,7 +536,11 @@ class AgentService:
     ) -> AgentResponse:
         """Run the LangGraph agent and return results."""
 
-        # Create workspace-bound tools (8 tools)
+        workspace = await self.workspace_service.get_workspace(workspace_id, user_id)
+        if not workspace or workspace.status != "running" or not workspace.container_id:
+            raise ValueError("Workspace is not running or not accessible")
+
+        # Create workspace-bound tools (16 tools)
         tools = create_workspace_tools(self.workspace_service, workspace_id, user_id)
 
         # Model routing
@@ -669,18 +748,23 @@ class AgentService:
         from app.services.context_manager import ContextManager
         from app.services.redis_memory import get_redis_memory
 
+        workspace = await self.workspace_service.get_workspace(workspace_id, user_id)
+        if not workspace or workspace.status != "running" or not workspace.container_id:
+            yield {"type": "error", "message": "Workspace is not running or not accessible."}
+            return
+
         conv_service = ConversationService(self.db)
         redis_mem = get_redis_memory()
         ctx_mgr = ContextManager(redis_mem, conv_service)
 
         if conversation_id:
-            conversation = await conv_service.get(conversation_id)
+            conversation = await conv_service.get_for_user(conversation_id, user_id)
             if not conversation:
                 conversation = await conv_service.get_or_create_for_workspace(user_id, workspace_id)
         else:
             conversation = await conv_service.get_or_create_for_workspace(user_id, workspace_id)
 
-        # Create workspace-bound tools (8 tools)
+        # Create workspace-bound tools (16 tools)
         tools = create_workspace_tools(self.workspace_service, workspace_id, user_id)
         tool_map = {t.name: t for t in tools}
 

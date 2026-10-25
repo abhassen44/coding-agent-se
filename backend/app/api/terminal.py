@@ -3,13 +3,16 @@ import asyncio
 import subprocess
 import threading
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends, HTTPException
 from sqlalchemy import select
 
-from app.core.database import async_session_maker
-from app.core.security import decode_token
+from app.core.database import async_session_maker, get_db
+from app.core.security import create_ws_ticket, decode_ws_ticket
+from app.api.deps import get_current_user
+from app.models.user import User
 from app.models.workspace import Workspace
 from app.services.auth_service import AuthService
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/terminal", tags=["Terminal"])
@@ -23,10 +26,12 @@ MAX_INPUT_BUFFER = 4096       # bytes — prevent unbounded growth
 
 
 # ── Auth helper ───────────────────────────────────────────────────────────────
-async def _authenticate_ws(token: str) -> int | None:
-    """Validate JWT and return user_id, or None."""
-    payload = decode_token(token)
-    if not payload or payload.get("type") != "access":
+async def _authenticate_ws(ticket: str, workspace_id: int) -> int | None:
+    """Validate a short-lived terminal ticket and return user_id, or None."""
+    payload = decode_ws_ticket(ticket)
+    if not payload:
+        return None
+    if int(payload.get("workspace_id", -1)) != workspace_id:
         return None
     user_id = payload.get("sub")
     if user_id is None:
@@ -144,18 +149,39 @@ async def _handle_input(
 
 
 # ── Main endpoint ─────────────────────────────────────────────────────────────
+@router.post("/{workspace_id}/ticket")
+async def create_terminal_ticket(
+    workspace_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mint a 60-second ticket for the terminal WebSocket."""
+    result = await db.execute(
+        select(Workspace).where(
+            Workspace.id == workspace_id,
+            Workspace.user_id == current_user.id,
+        )
+    )
+    workspace = result.scalar_one_or_none()
+    if not workspace:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if workspace.status != "running" or not workspace.container_id:
+        raise HTTPException(status_code=400, detail="Workspace is not running")
+    return {"ticket": create_ws_ticket(current_user.id, workspace_id), "expires_in": 60}
+
+
 @router.websocket("/{workspace_id}")
 async def terminal_ws(
     websocket: WebSocket,
     workspace_id: int,
-    token: str = Query(...),
+    ticket: str = Query(...),
 ):
     """
     WebSocket terminal endpoint using `docker exec` subprocess.
     Compatible with Docker Desktop (Windows/macOS) and Linux.
     """
     # ── Auth ──
-    user_id = await _authenticate_ws(token)
+    user_id = await _authenticate_ws(ticket, workspace_id)
     if user_id is None:
         await websocket.close(code=4001, reason="Unauthorized")
         return

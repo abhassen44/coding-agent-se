@@ -15,6 +15,7 @@ load_dotenv(dotenv_path=env_path, override=True)
 
 # Fetch key from environment
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-3-flash-preview")
 
 # We no longer configure globally, but instantiate the client.
 _api_configured = False
@@ -94,7 +95,7 @@ User: {message}"""
             
             # Create chat session using async client
             chat = self.client.aio.chats.create(
-                model="gemini-3-flash-preview",
+                model=GEMINI_CHAT_MODEL,
                 config=types.GenerateContentConfig(
                     system_instruction=self.SYSTEM_PROMPT,
                     max_output_tokens=8192,
@@ -141,7 +142,7 @@ User: {message}"""
             
             # Create chat session using async client
             chat = self.client.aio.chats.create(
-                model="gemini-3-flash-preview",
+                model=GEMINI_CHAT_MODEL,
                 config=types.GenerateContentConfig(
                     system_instruction=self.SYSTEM_PROMPT
                 ),

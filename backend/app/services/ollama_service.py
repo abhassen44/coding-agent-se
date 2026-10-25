@@ -3,9 +3,11 @@ import httpx
 import logging
 from typing import AsyncGenerator, Optional
 
+from app.core.config import get_settings
+
 logger = logging.getLogger(__name__)
 
-OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_BASE_URL = get_settings().ollama_base_url
 
 # Map frontend provider keys to backend Ollama models
 MODEL_MAPPING = {

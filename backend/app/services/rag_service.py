@@ -180,6 +180,7 @@ class RAGService:
                                 "file_path": file.path,
                                 "file_name": file.name,
                                 "repository_id": file.repository_id,
+                                "owner_id": file.owner_id,
                                 "start_line": chunk_data['start_line'],
                                 "end_line": chunk_data['end_line']
                             }
@@ -192,6 +193,36 @@ class RAGService:
         
         await self.db.commit()
         return indexed_count
+
+    async def delete_file_vectors(self, file_id: int) -> None:
+        """Remove all Qdrant points for a file."""
+        await self._delete_vectors([("file_id", file_id)])
+
+    async def delete_repository_vectors(self, repository_id: int) -> None:
+        """Remove all Qdrant points for a repository."""
+        await self._delete_vectors([("repository_id", repository_id)])
+
+    async def delete_owner_vectors(self, owner_id: int) -> None:
+        """Remove all Qdrant points owned by a user."""
+        await self._delete_vectors([("owner_id", owner_id)])
+
+    async def _delete_vectors(self, conditions: list[tuple[str, int]]) -> None:
+        if not self._qdrant_client:
+            return
+        try:
+            points_filter = Filter(
+                must=[
+                    FieldCondition(key=key, match=MatchValue(value=value))
+                    for key, value in conditions
+                ]
+            )
+            self._qdrant_client.delete(
+                collection_name=settings.qdrant_collection,
+                points_selector=points_filter,
+                wait=True,
+            )
+        except Exception as exc:
+            logger.warning("Failed to delete Qdrant points %s: %s", conditions, exc)
 
     async def search(
         self,
@@ -208,17 +239,23 @@ class RAGService:
             # Fallback to keyword search
             return await self._keyword_search(query, top_k, repository_id, owner_id)
         
-        # Build filter if repository specified
-        search_filter = None
+        # Build tenant/repository filters
+        conditions = []
         if repository_id:
-            search_filter = Filter(
-                must=[
-                    FieldCondition(
-                        key="repository_id",
-                        match=MatchValue(value=repository_id)
-                    )
-                ]
+            conditions.append(
+                FieldCondition(
+                    key="repository_id",
+                    match=MatchValue(value=repository_id),
+                )
             )
+        if owner_id:
+            conditions.append(
+                FieldCondition(
+                    key="owner_id",
+                    match=MatchValue(value=owner_id),
+                )
+            )
+        search_filter = Filter(must=conditions) if conditions else None
         
         # Search Qdrant
         search_result = self._qdrant_client.query_points(
@@ -228,13 +265,14 @@ class RAGService:
             query_filter=search_filter
         )
         
-        # Fetch chunks from database
+        # Fetch chunks from database, enforcing ownership again
         chunks_with_scores = []
         for point in search_result.points:
             chunk_id = point.payload.get("chunk_id")
-            chunk_result = await self.db.execute(
-                select(FileChunk).where(FileChunk.id == chunk_id)
-            )
+            query = select(FileChunk).join(File).where(FileChunk.id == chunk_id)
+            if owner_id:
+                query = query.where(File.owner_id == owner_id)
+            chunk_result = await self.db.execute(query)
             chunk = chunk_result.scalar_one_or_none()
             
             if chunk:

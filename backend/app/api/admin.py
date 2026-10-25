@@ -65,17 +65,13 @@ async def change_user_role(
     return UserListItem.model_validate(user)
 
 
-@router.delete("/users/{user_id}", status_code=status.HTTP_202_ACCEPTED)
+@router.delete("/users/{user_id}", status_code=status.HTTP_200_OK)
 async def delete_user(
     user_id: int,
     db: DbSession,
     admin: CurrentAdminUser,
 ):
-    """
-    Queue cascade deletion of a user (workspaces, repos, chats, logs, then user).
-    Returns 202 immediately — Celery handles the actual work.
-    Admin only.
-    """
+    """Delete a user and all owned resources. Admin only."""
     if user_id == admin.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
     service = AdminService(db)

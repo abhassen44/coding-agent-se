@@ -1,8 +1,10 @@
 """Workspace service for managing persistent Docker sandbox environments."""
 import os
+import re
 import shlex
 import asyncio
 import logging
+from contextlib import suppress
 from datetime import datetime
 from typing import Optional, List
 
@@ -56,7 +58,10 @@ class WorkspaceService:
         # Resolve repo URL from DB if repo_id given
         if repo_id and not repo_url:
             result = await self.db.execute(
-                select(Repository).where(Repository.id == repo_id)
+                select(Repository).where(
+                    Repository.id == repo_id,
+                    Repository.owner_id == user_id,
+                )
             )
             repo = result.scalar_one_or_none()
             if not repo:
@@ -67,9 +72,77 @@ class WorkspaceService:
         if not repo_url and not repo_id:
             raise ValueError("Either repo_url or repo_id must be provided")
 
+        active_statuses = ("creating", "starting", "running")
+        pending_statuses = ("creating", "starting")
+        pending_user = await self.db.scalar(
+            select(func.count(Workspace.id)).where(
+                Workspace.user_id == user_id,
+                Workspace.status.in_(pending_statuses),
+            )
+        )
+        pending_global = await self.db.scalar(
+            select(func.count(Workspace.id)).where(
+                Workspace.status.in_(pending_statuses)
+            )
+        )
+        user_count = pending_user or 0
+        total_count = pending_global or 0
+        if self.docker_client:
+            try:
+                user_count += len(
+                    await asyncio.to_thread(
+                        self.docker_client.containers.list,
+                        filters={
+                            "label": f"ica.user_id={user_id}",
+                            "status": "running",
+                        },
+                    )
+                )
+                total_count += len(
+                    await asyncio.to_thread(
+                        self.docker_client.containers.list,
+                        filters={"name": "ica_ws_", "status": "running"},
+                    )
+                )
+            except Exception as exc:
+                logger.warning("Could not count live workspace containers: %s", exc)
+                # Fall back to DB status when Docker cannot be queried.
+                user_count = await self.db.scalar(
+                    select(func.count(Workspace.id)).where(
+                        Workspace.user_id == user_id,
+                        Workspace.status.in_(active_statuses),
+                    )
+                ) or 0
+                total_count = await self.db.scalar(
+                    select(func.count(Workspace.id)).where(
+                        Workspace.status.in_(active_statuses)
+                    )
+                ) or 0
+        else:
+            user_count = await self.db.scalar(
+                select(func.count(Workspace.id)).where(
+                    Workspace.user_id == user_id,
+                    Workspace.status.in_(active_statuses),
+                )
+            ) or 0
+            total_count = await self.db.scalar(
+                select(func.count(Workspace.id)).where(
+                    Workspace.status.in_(active_statuses)
+                )
+            ) or 0
+
+        if user_count >= settings.max_workspaces_per_user:
+            raise ValueError(
+                f"Workspace limit reached ({settings.max_workspaces_per_user}). "
+                "Stop or destroy an existing workspace first."
+            )
+        if total_count >= settings.max_workspaces_global:
+            raise ValueError("Server workspace capacity reached. Try again later.")
+
         if not name:
             name = repo_url.rstrip("/").rsplit("/", 1)[-1].replace(".git", "") if repo_url else f"workspace_{repo_id}"
-        volume_name = f"ica_ws_{user_id}_{name}_{int(datetime.utcnow().timestamp())}"
+        docker_name = self._safe_docker_name(name)
+        volume_name = f"ica_ws_{user_id}_{docker_name}_{int(datetime.utcnow().timestamp())}"
         base_image = settings.workspace_base_image
 
         # Create DB record
@@ -93,14 +166,15 @@ class WorkspaceService:
                 volume_name,
                 base_image,
                 repo_url,
-                name,
+                docker_name,
+                user_id,
             )
         )
 
         return workspace
 
     async def _background_setup(
-        self, workspace_id: int, volume_name: str, base_image: str, repo_url: Optional[str], name: str
+        self, workspace_id: int, volume_name: str, base_image: str, repo_url: Optional[str], name: str, user_id: int
     ):
         """Runs the blocking Docker setup and updates the DB with a new session."""
         try:
@@ -111,6 +185,7 @@ class WorkspaceService:
                 base_image,
                 repo_url,
                 name,
+                user_id,
             )
             from app.core.database import async_session_maker
             async with async_session_maker() as db:
@@ -131,7 +206,7 @@ class WorkspaceService:
                     await db.commit()
 
     def _setup_container(
-        self, volume_name: str, base_image: str, repo_url: Optional[str], name: str
+        self, volume_name: str, base_image: str, repo_url: Optional[str], name: str, user_id: int
     ) -> str:
         """Create volume, start container, clone repo. Runs in thread pool."""
         # Ensure image exists
@@ -144,30 +219,51 @@ class WorkspaceService:
         # Create volume
         self.docker_client.volumes.create(name=volume_name)
 
+        # Define port bindings for local previewing (loopback only by default)
+        bind_host = settings.preview_bind_host
+        port_bindings = {
+            "3000/tcp": (bind_host, None),
+            "5000/tcp": (bind_host, None),
+            "5173/tcp": (bind_host, None),
+            "8000/tcp": (bind_host, None),
+            "8080/tcp": (bind_host, None),
+        }
+
         # Start container with volume mounted
-        container = self.docker_client.containers.run(
-            image=base_image,
-            command="sleep infinity",  # Keep alive
-            volumes={volume_name: {"bind": "/workspace", "mode": "rw"}},
-            working_dir="/workspace",
-            name=f"ica_ws_{name}_{volume_name[-8:]}",
-            detach=True,
-            mem_limit="512m",
-            cpu_period=100000,
-            cpu_quota=100000,  # 1 full CPU
-        )
+        try:
+            container = self.docker_client.containers.run(
+                image=base_image,
+                command="sleep infinity",  # Keep alive
+                volumes={volume_name: {"bind": "/workspace", "mode": "rw"}},
+                ports=port_bindings,
+                working_dir="/workspace",
+                name=f"ica_ws_{name}_{volume_name[-8:]}",
+                detach=True,
+                mem_limit=settings.workspace_memory_limit,
+                cpu_period=100000,
+                cpu_quota=settings.workspace_cpu_quota,
+                labels={"ica.workspace": "true", "ica.user_id": str(user_id)},
+            )
+        except Exception:
+            with suppress(Exception):
+                self.docker_client.volumes.get(volume_name).remove(force=True)
+            raise
 
         # Clone repo inside container (skip for local repos with no URL)
         if repo_url:
             exit_code, output = container.exec_run(
-                f"git clone {repo_url} .",
+                ["/bin/sh", "-c", f"git clone {shlex.quote(repo_url)} ."],
                 workdir="/workspace",
             )
             if exit_code != 0:
                 error_msg = output.decode("utf-8", errors="replace")
                 # If directory not empty (already cloned), that's okay
                 if "already exists and is not an empty directory" not in error_msg:
-                    logger.warning(f"Git clone warning: {error_msg}")
+                    with suppress(Exception):
+                        container.remove(force=True)
+                    with suppress(Exception):
+                        self.docker_client.volumes.get(volume_name).remove(force=True)
+                    raise ValueError(f"Git clone failed: {error_msg.strip()[:300]}")
         else:
             logger.info(f"Local repo — skipping git clone for workspace '{name}'")
 
@@ -456,6 +552,37 @@ class WorkspaceService:
         await self.db.commit()
         return {"path": path, "status": "deleted"}
 
+    async def get_workspace_ports(self, workspace_id: int, user_id: int) -> dict[str, int]:
+        """Get the mapped host ports for the workspace container."""
+        workspace = await self._get_owned(workspace_id, user_id)
+        if not workspace or not workspace.container_id:
+            return {}
+
+        try:
+            return await asyncio.get_event_loop().run_in_executor(
+                None, self._resolve_container_ports, workspace.container_id
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get container ports for {workspace_id}: {e}")
+            return {}
+
+    def _resolve_container_ports(self, container_id: str) -> dict[str, int]:
+        if not self.docker_client:
+            return {}
+        try:
+            container = self.docker_client.containers.get(container_id)
+            ports = container.attrs.get('NetworkSettings', {}).get('Ports', {}) or {}
+            mapping = {}
+            for container_port, host_bindings in ports.items():
+                if host_bindings:
+                    host_port = host_bindings[0].get('HostPort')
+                    if host_port:
+                        port_num = container_port.split('/')[0]
+                        mapping[port_num] = int(host_port)
+            return mapping
+        except Exception:
+            return {}
+
     # ── Helpers ─────────────────────────────────────────────────
 
     async def _get_running(self, workspace_id: int, user_id: int) -> Workspace:
@@ -468,6 +595,12 @@ class WorkspaceService:
         if not workspace.container_id:
             raise ValueError("No container associated with this workspace")
         return workspace
+
+    @staticmethod
+    def _safe_docker_name(name: str) -> str:
+        """Convert a display name into a valid, bounded Docker name."""
+        slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", name or "").strip(".-_")
+        return (slug or "workspace")[:48]
 
     @staticmethod
     def _resolve_path(work_dir: str, relative_path: str) -> str:

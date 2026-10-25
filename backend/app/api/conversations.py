@@ -1,7 +1,7 @@
 """REST API endpoints for conversation management."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,14 +78,14 @@ async def list_conversations(
 @router.get("/{conversation_id}/messages", response_model=MessageListResponse)
 async def get_conversation_messages(
     conversation_id: int,
-    limit: int = 50,
+    limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get messages for a conversation."""
     conv_service = ConversationService(db)
-    conv = await conv_service.get(conversation_id)
-    if not conv or conv.user_id != current_user.id:
+    conv = await conv_service.get_for_user(conversation_id, current_user.id)
+    if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     messages = await conv_service.get_history(conversation_id, limit=limit)
@@ -117,8 +117,8 @@ async def rename_conversation(
 ):
     """Rename a conversation."""
     conv_service = ConversationService(db)
-    conv = await conv_service.get(conversation_id)
-    if not conv or conv.user_id != current_user.id:
+    conv = await conv_service.get_for_user(conversation_id, current_user.id)
+    if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     await conv_service.update_title(conversation_id, body.title)
     return {"status": "renamed", "conversation_id": conversation_id, "title": body.title}

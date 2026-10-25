@@ -8,6 +8,7 @@ import { EditorTabs, EditorTab } from '@/components/workspace/EditorTabs';
 import { CodeEditor } from '@/components/workspace/CodeEditor';
 import { WorkspaceTerminal } from '@/components/workspace/Terminal';
 import { WorkspaceChat } from '@/components/workspace/WorkspaceChat';
+import { LivePreview } from '@/components/workspace/LivePreview';
 import { 
     Play, 
     Square, 
@@ -23,7 +24,8 @@ import {
     RefreshCw,
     Sparkles,
     PanelRightClose,
-    PanelRightOpen
+    PanelRightOpen,
+    ExternalLink
 } from 'lucide-react';
 
 interface OpenFile {
@@ -62,6 +64,13 @@ export default function WorkspacePage() {
 
     // AI panel state
     const [showAI, setShowAI] = useState(false);
+
+    // Preview state
+    const [showPreview, setShowPreview] = useState(false);
+    const [previewWidth, setPreviewWidth] = useState(450);
+    const isPreviewDraggingRef = useRef(false);
+    const previewDragStartXRef = useRef(0);
+    const previewDragStartWidthRef = useRef(0);
 
     // Save toast state
     const [showSaveToast, setShowSaveToast] = useState(false);
@@ -134,6 +143,34 @@ export default function WorkspacePage() {
         window.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseup', handleMouseUp);
     }, [aiPanelWidth]);
+
+    // Preview drag handler
+    const handlePreviewDragStart = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        isPreviewDraggingRef.current = true;
+        previewDragStartXRef.current = e.clientX;
+        previewDragStartWidthRef.current = previewWidth;
+        document.body.style.cursor = 'ew-resize';
+        document.body.style.userSelect = 'none';
+
+        const handleMouseMove = (ev: MouseEvent) => {
+            if (!isPreviewDraggingRef.current) return;
+            const delta = previewDragStartXRef.current - ev.clientX;
+            const newWidth = Math.min(Math.max(previewDragStartWidthRef.current + delta, 260), 800);
+            setPreviewWidth(newWidth);
+        };
+
+        const handleMouseUp = () => {
+            isPreviewDraggingRef.current = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            window.removeEventListener('mousemove', handleMouseMove);
+            window.removeEventListener('mouseup', handleMouseUp);
+        };
+
+        window.addEventListener('mousemove', handleMouseMove);
+        window.addEventListener('mouseup', handleMouseUp);
+    }, [previewWidth]);
 
 
     // --- Data Fetching ---
@@ -583,6 +620,21 @@ export default function WorkspacePage() {
                             {showAI ? <PanelRightClose className="w-3.5 h-3.5" /> : <PanelRightOpen className="w-3.5 h-3.5" />}
                         </button>
                     )}
+
+                    {status === 'running' && (
+                        <button
+                            onClick={() => setShowPreview(!showPreview)}
+                            className={`flex items-center gap-2 px-3 py-1.5 bg-[#1A2420] border rounded-lg text-sm transition-colors ${
+                                showPreview
+                                    ? 'border-[#2EFF7B] text-[#2EFF7B]'
+                                    : 'border-[#1F2D28] text-[#8FAEA2] hover:border-[#2EFF7B]/50 hover:text-[#2EFF7B]'
+                            }`}
+                            title={showPreview ? 'Hide Preview' : 'Show Preview'}
+                        >
+                            <ExternalLink className="w-4 h-4" />
+                            <span>Preview</span>
+                        </button>
+                    )}
                     
                     <button 
                         onClick={() => handleAction('destroy')}
@@ -636,23 +688,42 @@ export default function WorkspacePage() {
                                     onClose={handleTabClose}
                                 />
                                 
-                                <div className="flex-1 min-h-0 relative">
-                                    {activeFile ? (
-                                        <CodeEditor
-                                            content={activeFile.content}
-                                            language={activeFile.language}
-                                            path={activeFile.path}
-                                            onChange={handleEditorChange}
-                                            onSave={handleSaveFile}
-                                        />
-                                    ) : (
-                                        <div className="absolute inset-0 flex flex-col items-center justify-center text-[#5A7268]">
-                                            <div className="w-16 h-16 rounded-2xl bg-[#1A2420] border border-[#1F2D28] flex items-center justify-center mb-4">
-                                                <TerminalIcon className="w-8 h-8 text-[#2EFF7B]" />
+                                <div className="flex-1 flex min-h-0 relative">
+                                    <div className="flex-1 min-h-0 relative">
+                                        {activeFile ? (
+                                            <CodeEditor
+                                                content={activeFile.content}
+                                                language={activeFile.language}
+                                                path={activeFile.path}
+                                                onChange={handleEditorChange}
+                                                onSave={handleSaveFile}
+                                            />
+                                        ) : (
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center text-[#5A7268]">
+                                                <div className="w-16 h-16 rounded-2xl bg-[#1A2420] border border-[#1F2D28] flex items-center justify-center mb-4">
+                                                    <TerminalIcon className="w-8 h-8 text-[#2EFF7B]" />
+                                                </div>
+                                                <p className="text-sm">Select a file from the explorer to open in the editor.</p>
+                                                <p className="text-xs text-[#3A4F46] mt-2">Or press the terminal button to run commands</p>
                                             </div>
-                                            <p className="text-sm">Select a file from the explorer to open in the editor.</p>
-                                            <p className="text-xs text-[#3A4F46] mt-2">Or press the terminal button to run commands</p>
-                                        </div>
+                                        )}
+                                    </div>
+
+                                    {showPreview && (
+                                        <>
+                                            {/* Preview drag handle */}
+                                            <div
+                                                className="w-1 cursor-ew-resize hover:bg-[#2EFF7B]/40 bg-[#1F2D28] transition-colors shrink-0"
+                                                onMouseDown={handlePreviewDragStart}
+                                                onDoubleClick={() => setPreviewWidth(450)}
+                                            />
+                                            <div className="shrink-0 overflow-hidden flex flex-col bg-[#0B0F0E]" style={{ width: `${previewWidth}px` }}>
+                                                <LivePreview
+                                                    workspace={workspace}
+                                                    isVisible={showPreview}
+                                                />
+                                            </div>
+                                        </>
                                     )}
                                 </div>
 

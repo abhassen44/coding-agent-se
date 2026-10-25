@@ -48,6 +48,18 @@ class ConversationService:
         )
         return result.scalar_one_or_none()
 
+    async def get_for_user(
+        self, conversation_id: int, user_id: int
+    ) -> Optional[Conversation]:
+        """Get a conversation only if it belongs to the user."""
+        result = await self.db.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def get_or_create_for_workspace(
         self, user_id: int, workspace_id: int
     ) -> Conversation:

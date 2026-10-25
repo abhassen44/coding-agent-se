@@ -499,6 +499,9 @@ async def reindex_repository(
                     )
                     await session.commit()
 
+                # Remove old vectors before re-indexing
+                await RAGService(session).delete_repository_vectors(repo_id)
+
                 # 3. Re-index each file
                 file_service = FileService(session)
                 rag_service = RAGService(session)
@@ -554,6 +557,7 @@ async def delete_repository(
             detail="Repository not found"
         )
     
-    # Delete repository (cascades to files and chunks)
+    # Delete vectors and repository (cascades to files and chunks)
+    await RAGService(db).delete_repository_vectors(repo_id)
     await db.delete(repo)
     await db.commit()

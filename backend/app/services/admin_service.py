@@ -2,6 +2,7 @@
 import logging
 from typing import Optional
 
+import asyncio
 import docker
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,53 +85,107 @@ class AdminService:
         return user
 
     async def delete_user_cascade(self, user_id: int, admin_id: int) -> dict:
-        """
-        Trigger cascade deletion asynchronously.
-        Returns immediately — actual deletion runs in background.
-        """
+        """Delete a user and all owned resources (workspaces, files, vectors)."""
         user = await self._get_user_or_404(user_id)
+        if user_id == admin_id:
+            raise ValueError("Admins cannot delete their own account")
 
-        # Enqueue Celery task if available, otherwise run inline
-        try:
-            from app.tasks.admin_tasks import delete_user_task
-            delete_user_task.delay(user_id)
-            logger.info(f"Admin {admin_id} queued cascade delete for user {user_id}")
-        except ImportError:
-            # Celery not configured — run simplified inline delete
-            await self._inline_delete_user(user_id)
-            logger.info(f"Admin {admin_id} inline-deleted user {user_id}")
+        await self._inline_delete_user(user_id)
+        logger.info(f"Admin {admin_id} deleted user {user_id}")
 
         await LogService(self.db).log(
             action=USER_DELETED,
             user_id=admin_id,
             metadata={"target_user_id": user_id, "email": user.email},
         )
-        return {"message": f"User {user_id} deletion queued", "user_id": user_id}
+        return {"message": f"User {user_id} deleted", "user_id": user_id}
 
     async def _inline_delete_user(self, user_id: int):
-        """Simplified synchronous deletion (fallback when Celery unavailable)."""
+        """Delete workspaces, containers, files, vectors, memory, and executions."""
+        from pathlib import Path
         from sqlalchemy import delete as sql_delete
         from app.models.file import Repository, FileChunk, File
         from app.models.workspace import Workspace
+        from app.models.conversation import Conversation, ChatMessageRecord
+        from app.models.execution import Execution
+        from app.services.rag_service import RAGService
+        from app.services.workspace_service import WorkspaceService
 
-        # Delete workspaces
-        ws_result = await self.db.execute(select(Workspace).where(Workspace.user_id == user_id))
+        rag = RAGService(self.db)
+        workspace_service = WorkspaceService(self.db)
+
+        # Stop/remove containers and volumes (also deletes DB rows).
+        ws_result = await self.db.execute(
+            select(Workspace).where(Workspace.user_id == user_id)
+        )
         for ws in ws_result.scalars().all():
-            await self.db.delete(ws)
+            try:
+                await workspace_service.destroy_workspace(ws.id, user_id)
+            except Exception as exc:
+                logger.warning("Failed to destroy workspace %s: %s", ws.id, exc)
 
-        # Delete repos (cascades files/chunks via FK)
-        repo_result = await self.db.execute(select(Repository).where(Repository.owner_id == user_id))
-        for repo in repo_result.scalars().all():
-            await self.db.delete(repo)
+        # Remove Qdrant points for repositories and files.
+        repo_result = await self.db.execute(
+            select(Repository).where(Repository.owner_id == user_id)
+        )
+        repo_ids = [repo.id for repo in repo_result.scalars().all()]
+        for repo_id in repo_ids:
+            await rag.delete_repository_vectors(repo_id)
 
-        # Delete activity logs
+        file_result = await self.db.execute(
+            select(File).where(File.owner_id == user_id)
+        )
+        files = list(file_result.scalars().all())
+        for file in files:
+            await rag.delete_file_vectors(file.id)
+            Path(file.storage_path).unlink(missing_ok=True)
+        await rag.delete_owner_vectors(user_id)
+
+        # Delete database rows in FK-safe order.
+        conv_ids = select(Conversation.id).where(Conversation.user_id == user_id)
+        await self.db.execute(
+            sql_delete(ChatMessageRecord).where(
+                ChatMessageRecord.conversation_id.in_(conv_ids)
+            )
+        )
+        await self.db.execute(
+            sql_delete(Conversation).where(Conversation.user_id == user_id)
+        )
+        await self.db.execute(
+            sql_delete(Execution).where(Execution.user_id == user_id)
+        )
+
+        repo_ids_subq = select(Repository.id).where(Repository.owner_id == user_id)
+        await self.db.execute(
+            sql_delete(FileChunk).where(
+                FileChunk.file_id.in_(
+                    select(File.id).where(File.repository_id.in_(repo_ids_subq))
+                )
+            )
+        )
+        await self.db.execute(
+            sql_delete(File).where(File.repository_id.in_(repo_ids_subq))
+        )
+        await self.db.execute(
+            sql_delete(FileChunk).where(
+                FileChunk.file_id.in_(select(File.id).where(File.owner_id == user_id))
+            )
+        )
+        await self.db.execute(
+            sql_delete(File).where(File.owner_id == user_id)
+        )
+        await self.db.execute(
+            sql_delete(Repository).where(Repository.owner_id == user_id)
+        )
+        await self.db.execute(
+            sql_delete(Workspace).where(Workspace.user_id == user_id)
+        )
         await self.db.execute(
             sql_delete(ActivityLog).where(ActivityLog.user_id == user_id)
         )
-
-        # Delete user
-        user = await self._get_user_or_404(user_id)
-        await self.db.delete(user)
+        await self.db.execute(
+            sql_delete(User).where(User.id == user_id)
+        )
         await self.db.commit()
 
     # ── Stats ──────────────────────────────────────────────────────────────
@@ -147,11 +202,14 @@ class AdminService:
         total_repos = (await self.db.execute(select(func.count(Repository.id)))).scalar_one()
         total_workspaces = (await self.db.execute(select(func.count(Workspace.id)))).scalar_one()
 
-        # Count running Docker containers (any that start with "ica-ws-")
+        # Count running Docker containers (workspace names are `ica_ws_*`)
         active_containers = 0
         try:
             client = docker.from_env()
-            containers = client.containers.list(filters={"name": "ica-ws-", "status": "running"})
+            containers = await asyncio.to_thread(
+                client.containers.list,
+                filters={"name": "ica_ws_", "status": "running"},
+            )
             active_containers = len(containers)
         except Exception as e:
             logger.warning(f"Could not query Docker for container count: {e}")

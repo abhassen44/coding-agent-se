@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the ICA idle workspace reaper every 15 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+Unit=reap-workspaces.service
+
+[Install]
+WantedBy=timers.target

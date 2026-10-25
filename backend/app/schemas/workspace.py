@@ -23,6 +23,7 @@ class WorkspaceResponse(BaseModel):
     created_at: datetime
     last_accessed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    ports: Optional[dict[str, int]] = None
 
     class Config:
         from_attributes = True
@@ -32,6 +33,17 @@ class WorkspaceListResponse(BaseModel):
     """List of workspaces."""
     workspaces: List[WorkspaceResponse]
     total: int
+
+
+class PreviewTokenRequest(BaseModel):
+    """Request a short-lived token for the live-preview proxy."""
+    port: int = Field(..., ge=1, le=65535, description="Container port to preview")
+
+
+class PreviewTokenResponse(BaseModel):
+    """Short-lived preview token plus its lifetime."""
+    token: str
+    expires_in: int
 
 
 class FileNode(BaseModel):

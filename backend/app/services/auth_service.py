@@ -26,9 +26,13 @@ class AuthService:
         return result.scalar_one_or_none()
     
     async def create_user(self, user_data: UserCreate) -> User:
-        """Create a new user. Auto-assigns ADMIN role if email matches ADMIN_EMAIL env var."""
+        """Create a new user. Auto-assigns ADMIN when bootstrap is explicitly enabled."""
         settings = get_settings()
-        is_admin = settings.admin_email and user_data.email == settings.admin_email
+        is_admin = (
+            settings.allow_admin_bootstrap
+            and bool(settings.admin_email)
+            and user_data.email == settings.admin_email
+        )
 
         hashed_password = get_password_hash(user_data.password)
         user = User(
@@ -53,9 +57,14 @@ class AuthService:
         if not user.is_active:
             return None
 
-        # Bootstrap: auto-promote to ADMIN if email matches ADMIN_EMAIL env var
+        # Bootstrap: promote only when explicitly enabled
         settings = get_settings()
-        if settings.admin_email and user.email == settings.admin_email and user.role != UserRole.ADMIN.value:
+        if (
+            settings.allow_admin_bootstrap
+            and settings.admin_email
+            and user.email == settings.admin_email
+            and user.role != UserRole.ADMIN.value
+        ):
             user.role = UserRole.ADMIN.value
             await self.db.commit()
             await self.db.refresh(user)

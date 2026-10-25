@@ -53,7 +53,6 @@ export default function ChatInterface() {
     const [repositories, setRepositories] = useState<Repository[]>([]);
     const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
     const [showRepoDropdown, setShowRepoDropdown] = useState(false);
-    const [planMode, setPlanMode] = useState(false);
     const [provider, setProvider] = useState<"gemini" | "qwen" | "gemma4" | "gpt-oss-cloud" | "minimax-cloud" | "deepseek-cloud" | "nemotron-cloud">("gemini");
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -175,10 +174,7 @@ export default function ChatInterface() {
             setIsLoading(true);
             isLoadingRef.current = true;
             setStreamingContent("");
-            const history: ApiChatMessage[] = INITIAL_MESSAGES.slice(-10).map(msg => ({
-                role: msg.role,
-                content: msg.content,
-            }));
+            const history: ApiChatMessage[] = [];
             apiClient.sendMessage({ message: q, session_id: undefined, history, repository_id: undefined, provider: "gemini" })
                 .then(response => {
                     const aiMessage: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: response.message, timestamp: new Date() };
@@ -255,10 +251,12 @@ export default function ChatInterface() {
         isLoadingRef.current = true;
         setStreamingContent("");
 
-        const history: ApiChatMessage[] = messages.slice(-10).map((msg) => ({
-            role: msg.role,
-            content: msg.content,
-        }));
+        const history: ApiChatMessage[] = messages
+            .filter((msg) => msg.id !== "welcome")
+            .map((msg) => ({
+                role: msg.role,
+                content: msg.content,
+            }));
 
         try {
             if (useStreaming) {
@@ -337,13 +335,6 @@ export default function ChatInterface() {
         } finally {
             setIsLoading(false);
             isLoadingRef.current = false;
-        }
-    };
-
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            handleSubmit(e);
         }
     };
 
@@ -549,16 +540,6 @@ export default function ChatInterface() {
                                 <line x1="5" y1="12" x2="19" y2="12"></line>
                             </svg>
                         </button>
-
-                        {/* Plan mode toggle */}
-                        <label className="flex items-center gap-2 cursor-pointer group ml-1">
-                            <div className="relative flex items-center">
-                                <input type="checkbox" className="sr-only" checked={planMode} onChange={(e) => setPlanMode(e.target.checked)} />
-                                <div className={`block w-8 h-4 rounded-full transition-colors ${planMode ? "bg-[#2EFF7B]/20" : "bg-[#1A2420] border border-[#244235]"}`}></div>
-                                <div className={`absolute left-0.5 top-0.5 w-3 h-3 rounded-full transition-transform ${planMode ? "translate-x-4 bg-[#2EFF7B]" : "bg-[#5A7268] group-hover:bg-[#8FAEA2]"}`}></div>
-                            </div>
-                            <span className={`text-[11px] font-medium transition-colors ${planMode ? "text-[#2EFF7B]" : "text-[#5A7268] group-hover:text-[#8FAEA2]"}`}>Plan</span>
-                        </label>
 
                         {/* Spacer */}
                         <div className="flex-1" />

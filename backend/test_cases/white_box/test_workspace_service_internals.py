@@ -240,7 +240,13 @@ class TestQuotedWorkspaceCommands:
     @pytest.mark.asyncio
     async def test_wb_ws_17_write_file_quotes_paths_with_spaces(self, db, ws_user, running_workspace):
         svc = make_service(db)
-        svc._exec = AsyncMock(return_value="")
+
+        async def fake_exec(container_id, command, check=True):
+            if "wc -c" in command:
+                return str(len("print('ok')\n"))
+            return ""
+
+        svc._exec = AsyncMock(side_effect=fake_exec)
 
         await svc.write_file(running_workspace.id, ws_user.id, "src/My Folder/app.py", "print('ok')\n")
 

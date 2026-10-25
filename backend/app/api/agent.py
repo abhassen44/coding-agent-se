@@ -30,13 +30,16 @@ async def agent_act(
     Kept for backward compatibility.
     """
     agent = AgentService(db)
-    response = await agent.plan_actions(
-        workspace_id=request.workspace_id,
-        user_id=current_user.id,
-        prompt=request.prompt,
-        file_paths=request.file_paths,
-        provider=request.provider or "auto",
-    )
+    try:
+        response = await agent.plan_actions(
+            workspace_id=request.workspace_id,
+            user_id=current_user.id,
+            prompt=request.prompt,
+            file_paths=request.file_paths,
+            provider=request.provider or "auto",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     return response
 
 

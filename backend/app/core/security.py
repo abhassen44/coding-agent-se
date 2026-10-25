@@ -52,6 +52,61 @@ def create_refresh_token(subject: str | int) -> str:
     return encoded_jwt
 
 
+def create_preview_token(
+    subject: str | int,
+    workspace_id: int,
+    port: int,
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """Create a short-lived token for iframe live-preview requests.
+
+    Iframe navigations cannot attach an Authorization header, so the token is
+    embedded in the proxy URL path. It is scoped to one user, workspace, and port.
+    """
+    minutes = settings.preview_token_expire_minutes
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=minutes))
+    to_encode = {
+        "exp": expire,
+        "sub": str(subject),
+        "type": "preview",
+        "workspace_id": workspace_id,
+        "port": port,
+    }
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
+
+
+def create_ws_ticket(
+    subject: str | int,
+    workspace_id: int,
+    expires_delta: Optional[timedelta] = None,
+) -> str:
+    """Create a very short-lived ticket for the terminal WebSocket."""
+    expire = datetime.utcnow() + (expires_delta or timedelta(seconds=60))
+    to_encode = {
+        "exp": expire,
+        "sub": str(subject),
+        "type": "ws",
+        "workspace_id": workspace_id,
+    }
+    return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
+
+
+def decode_ws_ticket(token: str) -> dict[str, Any] | None:
+    """Decode a terminal ticket and reject other token types."""
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "ws":
+        return None
+    return payload
+
+
+def decode_preview_token(token: str) -> dict[str, Any] | None:
+    """Decode a preview token and reject non-preview token types."""
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != "preview":
+        return None
+    return payload
+
+
 def decode_token(token: str) -> dict[str, Any] | None:
     """Decode and validate a JWT token."""
     try:

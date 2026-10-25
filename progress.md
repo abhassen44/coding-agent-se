@@ -15,15 +15,15 @@
 | **Phase 4A** | Sandbox Workspace — Container per project | ✅ Completed | Workspace model, WorkspaceService with Docker lifecycle + file API, 11 REST endpoints, Open Workspace button |
 | **Phase 4B** | Web Code Editor — Monaco/VS Code in browser | ✅ Completed | Monaco editor, multi-tab editing, file tree, create/edit/save/delete |
 | **Phase 4C** | Terminal & Commands — Shell inside sandbox | ✅ Completed | WebSocket terminal via Docker exec, xterm.js UI, toggle panel |
-| **Phase 4D** | AI Agent in Sandbox — AI reads/writes/runs in workspace | ✅ Completed | Smart Qwen/Gemini routing, structured JSON actions, accept/reject flow, workspace chat panel |
+| **Phase 4D** | AI Agent in Sandbox — AI reads/writes/runs in workspace | ✅ Completed | Smart multi-provider routing, 16 workspace tools, live streaming edits, workspace chat panel |
 | **Phase 5** | Admin Panel — User management, Logs & monitoring, System settings | ✅ Completed | User CRUD, activity logs, admin dashboard, JWT role guard |
-| **Phase 6** | Agent Memory — Persistent context across sessions | 🔶 In Progress | Redis session buffer, Postgres conversations, Qdrant episodic memory |
+| **Phase 6** | Agent Memory — Persistent context across sessions | 🔶 In Progress | Redis session buffer + Postgres conversations complete; Qdrant episodic memory pending |
 
 ## Additional Features
 | Phase | Name | Status | Details |
 |-------|------|---------|---------|
 | **Phase 7** | Automation — Task definitions, Workflow execution, Scheduling | ❌ Not Started | Multi-step tasks, background execution, cron triggers |
-| **Phase 4E** | Live Preview — See the app running | ❌ Not Started | Host proxying, companion container, iframe preview, start/stop dev server |
+| **Phase 4E** | Live Preview — See the app running | ✅ Completed | Port publishing, backend HTTP/WS reverse proxy, signed preview tokens, iframe preview |
 
 
 ---
@@ -67,13 +67,14 @@
 - **Context-aware from RAG + live files**
 
 ### Phase 4E — Live Preview ✅
-- **Port proxying** from sandbox container to host via Alpine companion
+- **Port publishing** for 3000, 5000, 5173, 8000, 8080 (loopback by default)
+- **Backend HTTP reverse proxy** with short-lived, path-scoped preview tokens
+- **WebSocket proxying** for dev-server HMR
 - **iframe preview** of the running app in the Workspace UI
-- **Redis state management** for preview lifecycle
-- **Dev server management** — start/stop the app inside sandbox (e.g. npm start)
+- **Manual refresh** and open-in-new-window actions
 
 ### Phase 5 — Admin Panel ✅
-- **Admin bootstrap** — `ADMIN_EMAIL` env var auto-promotes on register/login
+- **Admin bootstrap** — set `ADMIN_EMAIL` + `ALLOW_ADMIN_BOOTSTRAP=true`, then register/login; disable after bootstrap
 - **Activity logging** — `ActivityLog` model, `LogService` for USER_LOGIN, REPO_CREATED, AGENT_RUN, WORKSPACE_CREATED events
 - **Admin service** — User list, ban/unban, role change, cascade delete, system stats (Docker containers)
 - **Admin API** — 6 protected routes under `/api/v1/admin/*` guarded by `CurrentAdminUser`

@@ -1,5 +1,6 @@
 """File service for handling file uploads and storage."""
 import os
+import re
 import hashlib
 import mimetypes
 from pathlib import Path
@@ -77,6 +78,15 @@ class FileService:
         return EXTENSION_TO_LANGUAGE.get(ext)
 
     @staticmethod
+    def sanitize_filename(filename: str) -> str:
+        """Keep only a safe basename so uploads cannot escape the storage root."""
+        name = Path(filename.replace("\\", "/")).name
+        name = re.sub(r"[\x00-\x1f\x7f]", "", name).strip()
+        if name in ("", ".", ".."):
+            return "unnamed"
+        return name[:200]
+
+    @staticmethod
     def compute_hash(content: bytes) -> str:
         """Compute SHA-256 hash of file content."""
         return hashlib.sha256(content).hexdigest()
@@ -84,10 +94,11 @@ class FileService:
     def _get_storage_path(self, owner_id: int, filename: str, content_hash: str) -> Path:
         """Generate storage path for file."""
         # Organize by owner_id and hash prefix for scalability
+        safe_name = self.sanitize_filename(filename)
         hash_prefix = content_hash[:2]
         storage_dir = self.storage_base / str(owner_id) / hash_prefix
         storage_dir.mkdir(parents=True, exist_ok=True)
-        return storage_dir / f"{content_hash}_{filename}"
+        return storage_dir / f"{content_hash}_{safe_name}"
 
     async def upload_file(
         self,
@@ -98,6 +109,17 @@ class FileService:
         original_path: Optional[str] = None
     ) -> File:
         """Upload and store a file."""
+        filename = self.sanitize_filename(filename)
+        if repository_id is not None:
+            repo_result = await self.db.execute(
+                select(Repository.id).where(
+                    Repository.id == repository_id,
+                    Repository.owner_id == owner_id,
+                )
+            )
+            if repo_result.scalar_one_or_none() is None:
+                raise ValueError("Repository not found")
+
         # Compute file metadata
         content_hash = self.compute_hash(file_content)
         mime_type, _ = mimetypes.guess_type(filename)
@@ -105,10 +127,12 @@ class FileService:
         
         # Determine storage path
         storage_path = self._get_storage_path(owner_id, filename, content_hash)
+        temp_path = storage_path.with_suffix(".tmp")
         
-        # Write file to storage
-        with open(storage_path, "wb") as f:
+        # Atomic write: temp file then rename
+        with open(temp_path, "wb") as f:
             f.write(file_content)
+        os.replace(temp_path, storage_path)
         
         # Create database record
         file = File(
@@ -123,9 +147,14 @@ class FileService:
             storage_path=str(storage_path)
         )
         
-        self.db.add(file)
-        await self.db.commit()
-        await self.db.refresh(file)
+        try:
+            self.db.add(file)
+            await self.db.commit()
+            await self.db.refresh(file)
+        except Exception:
+            await self.db.rollback()
+            storage_path.unlink(missing_ok=True)
+            raise
         
         return file
 

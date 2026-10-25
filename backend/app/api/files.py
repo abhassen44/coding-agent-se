@@ -1,10 +1,13 @@
 """File and repository API endpoints."""
+import asyncio
 import base64
 import io
+import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, status, Query
 
 from app.api.deps import DbSession, CurrentUser
+from app.core.config import get_settings
 from app.services.file_service import FileService
 from app.services.rag_service import RAGService
 from app.schemas.file import (
@@ -14,6 +17,8 @@ from app.schemas.file import (
 )
 
 router = APIRouter(prefix="/files", tags=["files"])
+settings = get_settings()
+logger = logging.getLogger(__name__)
 
 # ── Supported types ─────────────────────────────────────────────────────────
 PDF_TYPES = {"application/pdf", "pdf"}
@@ -80,43 +85,66 @@ async def extract_text(
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Word extraction failed: {e}")
 
-    # ── Images — Ollama Vision ────────────────────────────────────
+    # ── Images — Gemini Vision, then Ollama fallback ──────────────
     elif mime in IMAGE_TYPES or ext in {"png", "jpg", "jpeg", "gif", "webp", "bmp"}:
-        try:
-            import httpx
-            import base64
-            from app.services.ollama_service import OLLAMA_BASE_URL
+        if settings.gemini_api_key:
+            try:
+                from google import genai
+                from google.genai import types
 
-            b64_image = base64.b64encode(content).decode("utf-8")
-            target_model = "gemma4:31b-cloud"
-
-            # Use Ollama API with images array
-            with httpx.Client(timeout=120.0) as client:
-                resp = client.post(
-                    f"{OLLAMA_BASE_URL}/api/chat",
-                    json={
-                        "model": target_model,
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": "Describe this image in detail. If it contains text, code, diagrams, charts, or tables, transcribe and explain them fully.",
-                                "images": [b64_image]
-                            }
-                        ],
-                        "stream": False,
-                        "options": {"temperature": 0.1}
-                    }
+                client = genai.Client(api_key=settings.gemini_api_key)
+                response = await client.aio.models.generate_content(
+                    model=settings.gemini_chat_model,
+                    contents=[
+                        types.Part.from_bytes(
+                            data=content,
+                            mime_type=mime or "image/png",
+                        ),
+                        "Describe this image in detail. If it contains text, code, "
+                        "diagrams, charts, or tables, transcribe and explain them fully.",
+                    ],
                 )
-                
-                if resp.status_code == 200:
-                    data = resp.json()
-                    extracted = data.get("message", {}).get("content", "[No description generated]")
-                else:
-                    extracted = f"[Ollama Error: HTTP {resp.status_code} - {resp.text[:100]}]"
+                extracted = (response.text or "").strip()
+                file_type = "image"
+            except Exception as exc:
+                extracted = ""
+                logger.warning("Gemini image extraction failed: %s", exc)
 
-            file_type = "image"
-        except Exception as e:
-            raise HTTPException(status_code=422, detail=f"Image analysis failed: {e}")
+        if not extracted:
+            try:
+                from app.services.ollama_service import OLLAMA_BASE_URL
+
+                b64_image = base64.b64encode(content).decode("utf-8")
+                payload = {
+                    "model": "gemma4:31b-cloud",
+                    "messages": [{
+                        "role": "user",
+                        "content": "Describe this image in detail. If it contains text, "
+                                   "code, diagrams, charts, or tables, transcribe and explain them fully.",
+                        "images": [b64_image],
+                    }],
+                    "stream": False,
+                    "options": {"temperature": 0.1},
+                }
+
+                def _ollama_extract() -> str:
+                    import httpx
+                    with httpx.Client(timeout=120.0) as client:
+                        resp = client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
+                        if resp.status_code != 200:
+                            raise RuntimeError(f"Ollama HTTP {resp.status_code}")
+                        return resp.json().get("message", {}).get("content", "")
+
+                extracted = await asyncio.to_thread(_ollama_extract)
+                file_type = "image"
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Image analysis failed: {exc}",
+                )
+
+        if not extracted:
+            extracted = "[No description generated]"
 
     # ── Plain text / code ─────────────────────────────────────────
     elif mime in TEXT_TYPES or ext in {"txt", "md", "py", "js", "ts", "tsx", "jsx",
@@ -173,13 +201,16 @@ async def upload_file(
     file_service = FileService(db)
     
     # Upload file
-    stored_file = await file_service.upload_file(
-        file_content=content,
-        filename=file.filename or "unnamed",
-        owner_id=current_user.id,
-        repository_id=repository_id,
-        original_path=file.filename
-    )
+    try:
+        stored_file = await file_service.upload_file(
+            file_content=content,
+            filename=file.filename or "unnamed",
+            owner_id=current_user.id,
+            repository_id=repository_id,
+            original_path=FileService.sanitize_filename(file.filename or "unnamed")
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
     
     # Index for RAG if it's a code file
     if stored_file.language:
@@ -281,6 +312,13 @@ async def delete_file(
 ):
     """Delete a file."""
     file_service = FileService(db)
+    file = await file_service.get_file(file_id, current_user.id)
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="File not found"
+        )
+    await RAGService(db).delete_file_vectors(file_id)
     deleted = await file_service.delete_file(file_id, current_user.id)
     
     if not deleted:

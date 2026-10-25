@@ -1,0 +1,18 @@
+[Unit]
+Description=ICA FastAPI backend
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=ica
+WorkingDirectory=/opt/ica/backend
+EnvironmentFile=/opt/ica/.env
+ExecStart=/opt/ica/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
