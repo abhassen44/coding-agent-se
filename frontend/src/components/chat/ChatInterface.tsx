@@ -581,6 +581,7 @@ export default function ChatInterface() {
                         {/* Send Button — Circular */}
                         <button
                             type="submit"
+                            aria-label="Send message"
                             disabled={!input.trim() || isLoading || attachedFiles.some(f => f.status === "extracting")}
                             className="flex h-9 w-9 items-center justify-center bg-[#2EFF7B] text-[#0B0F0E] rounded-full hover:bg-[#1ED760] disabled:opacity-40 disabled:bg-[#1A2420] disabled:text-[#5A7268] transition-all ml-1"
                         >
