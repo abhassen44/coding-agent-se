@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import MessageBubble from "./MessageBubble";
-import { apiClient, ChatMessage as ApiChatMessage, ConversationMessage } from "@/lib/api";
+import { apiClient, ChatMessage as ApiChatMessage, ChatStreamMeta, ConversationMessage } from "@/lib/api";
 
 interface Message {
     id: string;
@@ -49,7 +49,7 @@ export default function ChatInterface() {
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [conversationId, setConversationId] = useState<number | null>(null);
     const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
-    const useStreaming = false;
+    const useStreaming = true;
     const [repositories, setRepositories] = useState<Repository[]>([]);
     const [selectedRepoId, setSelectedRepoId] = useState<number | null>(null);
     const [showRepoDropdown, setShowRepoDropdown] = useState(false);
@@ -261,17 +261,40 @@ export default function ChatInterface() {
         try {
             if (useStreaming) {
                 let fullContent = "";
+                let streamMeta: ChatStreamMeta | null = null;
+                const activeConversationId = conversationId;
                 await apiClient.streamMessage(
                     { message: currentInput, conversation_id: conversationId || undefined, session_id: sessionId || undefined, history, repository_id: selectedRepoId || undefined, provider },
                     (chunk) => { fullContent += chunk; setStreamingContent(fullContent); },
                     () => {
-                        const aiMessage: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: fullContent, timestamp: new Date() };
-                        setMessages((prev) => [...prev, aiMessage]);
+                        if (fullContent) {
+                            const aiMessage: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: fullContent, timestamp: new Date() };
+                            setMessages((prev) => [...prev, aiMessage]);
+                        }
                         setStreamingContent("");
                         setIsLoading(false);
                         isLoadingRef.current = false;
+                        if (!activeConversationId && streamMeta?.sessionId) {
+                            const title = currentInput.slice(0, 40) + (currentInput.length > 40 ? "..." : "");
+                            saveRecentChat(streamMeta.sessionId, title);
+                            window.dispatchEvent(new CustomEvent("conversation-updated"));
+                        }
                     },
-                    (error) => { console.error("Streaming error:", error); handleNonStreamingResponse(currentInput, history); }
+                    (error) => {
+                        console.error("Streaming error:", error);
+                        if (!fullContent) {
+                            void handleNonStreamingResponse(currentInput, history);
+                        } else {
+                            setStreamingContent("");
+                            setIsLoading(false);
+                            isLoadingRef.current = false;
+                        }
+                    },
+                    (meta) => {
+                        streamMeta = meta;
+                        if (meta.conversationId) setConversationId(meta.conversationId);
+                        if (meta.sessionId) setSessionId(meta.sessionId);
+                    }
                 );
             } else {
                 await handleNonStreamingResponse(currentInput, history);
