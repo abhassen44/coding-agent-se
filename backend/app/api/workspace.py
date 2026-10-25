@@ -14,8 +14,10 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.preview_rewrite import rewrite_css, rewrite_html
 
 from app.schemas.workspace import (
     WorkspaceCreate,
@@ -312,7 +314,7 @@ async def _proxy_http(
     user_id: int,
     db: AsyncSession,
     token: str | None = None,
-) -> StreamingResponse:
+) -> Response:
     """Forward an HTTP request to the container's published dev-server port."""
     service = WorkspaceService(db)
     host_port = await _resolve_preview_port(service, workspace_id, user_id, port)
@@ -377,6 +379,31 @@ async def _proxy_http(
             response_headers["Location"] = (
                 f"/api/v1/workspace/{workspace_id}/proxy/{token}/{port}{location}"
             )
+
+    content_type = response_headers.get("content-type", "").lower()
+    base_path = (
+        f"/api/v1/workspace/{workspace_id}/proxy/{token}/{port}/"
+        if token
+        else f"/api/v1/workspace/{workspace_id}/proxy/{port}/"
+    )
+    if ("text/html" in content_type or "text/css" in content_type):
+        content = await resp.aread()
+        await resp.aclose()
+        await client.aclose()
+        if len(content) <= 5 * 1024 * 1024:
+            text = content.decode("utf-8", errors="replace")
+            text = rewrite_html(text, base_path) if "text/html" in content_type else rewrite_css(text, base_path)
+            content = text.encode("utf-8")
+        response_headers.pop("content-encoding", None)
+        response_headers.pop("Content-Encoding", None)
+        response_headers.pop("content-type", None)
+        response_headers.pop("Content-Type", None)
+        return Response(
+            content=content,
+            status_code=resp.status_code,
+            media_type=content_type or None,
+            headers=response_headers,
+        )
 
     async def generate():
         try:
