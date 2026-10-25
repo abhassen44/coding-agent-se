@@ -75,3 +75,5 @@ important_plans/
 /.GSD-STYLE.md
 /.model_capabilities.yaml
 /.PROJECT_RULES.md
+/.agents/
+/graphify-out/
