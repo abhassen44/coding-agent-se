@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     
     # Database
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/ica"
+    database_url: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/ica"
     
     # JWT
     secret_key: str = "your-secret-key-change-in-production"
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     
     github_token: str = ""
     # Vector DB
-    qdrant_host: str = "localhost"
+    qdrant_host: str = "127.0.0.1"
     qdrant_port: int = 6333
     qdrant_collection: str = "ica_code_chunks"
     
@@ -39,10 +39,10 @@ class Settings(BaseSettings):
     file_storage_path: str = "./storage/files"
     
     # Redis
-    redis_url: str = "redis://localhost:6380"
+    redis_url: str = "redis://127.0.0.1:6380"
 
     # Ollama (local or remote daemon)
-    ollama_base_url: str = "http://localhost:11434"
+    ollama_base_url: str = "http://127.0.0.1:11434"
     
     # Execution Engine
     execution_timeout: int = 10
