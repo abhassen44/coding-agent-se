@@ -16,7 +16,7 @@ from app.schemas.chat import (
 from app.services.gemini_service import get_gemini_service
 from app.services.ollama_service import get_ollama_service, is_ollama_provider
 from app.services.rag_service import RAGService
-from app.core.database import get_db
+from app.core.database import get_db, async_session_maker
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.file import Repository
@@ -157,33 +157,86 @@ async def stream_message(
 ):
     """Stream AI response for a message with optional RAG context."""
     from app.services.conversation_service import ConversationService
+    from app.services.context_manager import ContextManager
+    from app.services.redis_memory import get_redis_memory
 
+    conv_service = ConversationService(db)
+    redis_mem = get_redis_memory()
+    ctx_mgr = ContextManager(redis_mem, conv_service)
+
+    await _assert_repository_owner(db, request.repository_id, current_user.id)
+
+    conversation = None
     if request.conversation_id:
-        conversation = await ConversationService(db).get_for_user(
+        conversation = await conv_service.get_for_user(
             request.conversation_id, current_user.id
         )
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
+    if not conversation:
+        title = request.message[:40] + ("..." if len(request.message) > 40 else "")
+        conversation = await conv_service.create(
+            user_id=current_user.id,
+            title=title,
+        )
 
-    await _assert_repository_owner(db, request.repository_id, current_user.id)
+    history_msgs = await ctx_mgr.get_context_messages(conversation.id)
+    history = ctx_mgr.to_chat_history_dicts(history_msgs)
+    if not history and request.history:
+        history = [
+            {"role": msg.role, "content": msg.content}
+            for msg in request.history
+            if msg.role in ("user", "assistant")
+        ]
+
     ai_service = get_ai_service(request.provider or "gemini")
 
-    # Convert history to dict format
-    history = None
-    if request.history:
-        history = [{"role": msg.role, "content": msg.content} for msg in request.history]
-
-    # Get RAG context if repository is specified
     context = request.context
     if request.repository_id and not context:
         context = await get_rag_context(
             db, request.message, request.repository_id, current_user.id
         )
 
+    session_id = request.session_id or str(uuid.uuid4())
+
     async def generate() -> AsyncGenerator[str, None]:
-        async for chunk in ai_service.stream_response(request.message, history, context):
-            yield f"data: {chunk}\n\n"
-        yield "data: [DONE]\n\n"
+        chunks: list[str] = []
+        saved = False
+        completed = False
+        try:
+            async for chunk in ai_service.stream_response(request.message, history, context):
+                chunks.append(chunk)
+                yield f"data: {chunk}\n\n"
+            yield "data: [DONE]\n\n"
+            completed = True
+        finally:
+            if chunks and not saved:
+                saved = True
+                answer = "".join(chunks)
+                partial = not completed
+                try:
+                    async with async_session_maker() as persist_db:
+                        persist_service = ConversationService(persist_db)
+                        await persist_service.add_message(
+                            conversation.id, "user", request.message
+                        )
+                        await persist_service.add_message(
+                            conversation.id,
+                            "assistant",
+                            answer,
+                            metadata={
+                                "provider": request.provider,
+                                "streamed": True,
+                                "partial": partial,
+                            },
+                        )
+                    await redis_mem.push_message(conversation.id, "user", request.message)
+                    await redis_mem.push_message(conversation.id, "assistant", answer)
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Failed to persist streamed chat: %s", exc
+                    )
 
     return StreamingResponse(
         generate(),
@@ -191,6 +244,8 @@ async def stream_message(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Conversation-Id": str(conversation.id),
+            "X-Session-Id": session_id,
         },
     )
 
