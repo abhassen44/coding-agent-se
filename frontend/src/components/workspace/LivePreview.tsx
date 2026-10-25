@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore } from 'react';
 import { WorkspaceResponse, apiClient, getErrorMessage } from '@/lib/api';
 import {
     RefreshCw,
@@ -14,6 +14,7 @@ import {
 interface LivePreviewProps {
     workspace: WorkspaceResponse | null;
     isVisible: boolean;
+    allowDirect?: boolean;
 }
 
 interface PreviewSession {
@@ -23,9 +24,18 @@ interface PreviewSession {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
 
-export function LivePreview({ workspace, isVisible }: LivePreviewProps) {
+const subscribeLocalhost = () => () => undefined;
+const getLocalhostSnapshot = () =>
+    typeof window !== 'undefined' &&
+    ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const getLocalhostServerSnapshot = () => false;
+
+export function LivePreview({ workspace, isVisible, allowDirect }: LivePreviewProps) {
     const [selectedPort, setSelectedPort] = useState<string>('');
     const [pathInput, setPathInput] = useState<string>('/');
+    const [directPath, setDirectPath] = useState<string>('/');
+    const [directRefreshKey, setDirectRefreshKey] = useState<number>(0);
+    const [mode, setMode] = useState<'proxy' | 'direct'>('proxy');
     const [iframeUrl, setIframeUrl] = useState<string>('');
     const [previewSession, setPreviewSession] = useState<PreviewSession | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -33,6 +43,12 @@ export function LivePreview({ workspace, isVisible }: LivePreviewProps) {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const pathRef = useRef(pathInput);
     pathRef.current = pathInput;
+    const localhost = useSyncExternalStore(
+        subscribeLocalhost,
+        getLocalhostSnapshot,
+        getLocalhostServerSnapshot
+    );
+    const isDirectAvailable = allowDirect === undefined ? localhost : allowDirect;
 
     const ports = useMemo(() => workspace?.ports || {}, [workspace?.ports]);
     const availablePorts = useMemo(() => Object.keys(ports).sort(), [ports]);
@@ -45,6 +61,16 @@ export function LivePreview({ workspace, isVisible }: LivePreviewProps) {
     const effectivePort = selectedPort && availablePorts.includes(selectedPort)
         ? selectedPort
         : preferredPort;
+
+    const mappedPort = effectivePort ? workspace?.ports?.[effectivePort] : undefined;
+    const normalizedDirectPath = directPath.startsWith('/') ? directPath : `/${directPath}`;
+    const directRefresh = directRefreshKey
+        ? `${normalizedDirectPath.includes('?') ? '&' : '?'}__preview_refresh=${directRefreshKey}`
+        : '';
+    const directUrl = mode === 'direct' && mappedPort
+        ? `http://127.0.0.1:${mappedPort}${normalizedDirectPath}${directRefresh}`
+        : '';
+    const displayUrl = mode === 'direct' ? directUrl : iframeUrl;
 
     const getProxyUrl = useCallback((port: string, path: string, token: string) => {
         if (!workspace?.id || !port || !token) return '';
@@ -84,26 +110,30 @@ export function LivePreview({ workspace, isVisible }: LivePreviewProps) {
 
     // Load (or reload) when the pane opens, the workspace changes, or the port changes.
     useEffect(() => {
-        if (!isVisible) return;
+        if (!isVisible || mode === 'direct') return;
         void loadPreview();
-    }, [isVisible, loadPreview]);
+    }, [isVisible, loadPreview, mode]);
 
     // Refresh the short-lived token before it expires.
     useEffect(() => {
-        if (!isVisible || !previewSession) return;
+        if (!isVisible || mode === 'direct' || !previewSession) return;
         const refreshIn = Math.max(5_000, previewSession.expiresAt - Date.now() - 60_000);
         const timer = window.setTimeout(() => void loadPreview(), refreshIn);
         return () => window.clearTimeout(timer);
-    }, [isVisible, previewSession, loadPreview]);
+    }, [isVisible, mode, previewSession, loadPreview]);
 
     const handleRefresh = () => {
+        if (mode === 'direct') {
+            setDirectRefreshKey((value) => value + 1);
+            return;
+        }
         setIsLoading(true);
         setLoadError(null);
         void loadPreview(undefined, true);
     };
 
     const handleOpenExternal = () => {
-        if (iframeUrl) window.open(iframeUrl, '_blank', 'noopener,noreferrer');
+        if (displayUrl) window.open(displayUrl, '_blank', 'noopener,noreferrer');
     };
 
     const handlePortChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -114,7 +144,12 @@ export function LivePreview({ workspace, isVisible }: LivePreviewProps) {
     const handlePathKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'Enter') {
             setLoadError(null);
-            void loadPreview(pathInput);
+            if (mode === 'direct') {
+                setDirectPath(pathInput);
+                setDirectRefreshKey((value) => value + 1);
+            } else {
+                void loadPreview(pathInput);
+            }
         }
     };
 
@@ -164,6 +199,21 @@ export function LivePreview({ workspace, isVisible }: LivePreviewProps) {
 
                 {/* Actions */}
                 <div className="flex items-center gap-1.5 shrink-0">
+                    {isDirectAvailable && (
+                        <button
+                            type="button"
+                            aria-label={mode === 'direct' ? 'Use proxy mode' : 'Use direct mode'}
+                            onClick={() => setMode((value) => (value === 'direct' ? 'proxy' : 'direct'))}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-semibold transition-colors ${
+                                mode === 'direct'
+                                    ? 'bg-[#2EFF7B]/15 text-[#2EFF7B]'
+                                    : 'text-[#8FAEA2] hover:bg-[#1A2420] hover:text-[#2EFF7B]'
+                            }`}
+                            title={mode === 'direct' ? 'Switch to proxy mode' : 'Switch to direct mode (local HMR)'}
+                        >
+                            {mode === 'direct' ? 'Proxy' : 'Direct'}
+                        </button>
+                    )}
                     <button
                         onClick={handleRefresh}
                         disabled={availablePorts.length === 0}
@@ -174,7 +224,7 @@ export function LivePreview({ workspace, isVisible }: LivePreviewProps) {
                     </button>
                     <button
                         onClick={handleOpenExternal}
-                        disabled={!iframeUrl}
+                        disabled={!displayUrl}
                         className="p-1.5 hover:bg-[#1A2420] text-[#8FAEA2] hover:text-[#2EFF7B] disabled:opacity-30 disabled:pointer-events-none rounded-lg transition-colors"
                         title="Open in new window"
                     >
@@ -203,12 +253,12 @@ export function LivePreview({ workspace, isVisible }: LivePreviewProps) {
                             <span>Preview supports ports 3000, 5000, 5173, 8000, 8080</span>
                         </div>
                     </div>
-                ) : iframeUrl || loadError ? (
+                ) : displayUrl || loadError ? (
                     <>
-                        {iframeUrl && (
+                        {displayUrl && (
                             <iframe
                                 ref={iframeRef}
-                                src={iframeUrl}
+                                src={displayUrl}
                                 className="w-full h-full border-none"
                                 onLoad={() => setIsLoading(false)}
                                 onError={() => {

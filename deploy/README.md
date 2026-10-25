@@ -146,3 +146,5 @@ workspace creation, terminal, and preview.
 - Keep `DEBUG=false`; debug mode permits all CORS origins.
 - The free Oracle tier may reclaim an idle instance. Keeping the app healthy and used avoids it.
 - Gemini free-tier quotas are volatile; budget a small paid quota for a demo with 10 users.
+- Remote preview uses proxy mode. The local **Direct** preview button relies on loopback ports and
+  is not available to remote browsers. Remote HMR needs a wildcard preview subdomain.
